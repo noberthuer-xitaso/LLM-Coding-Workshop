@@ -215,3 +215,81 @@ Elicit the brief with the Socratic Method — a few questions at a time, not a f
 Shape the content top-down with the Pyramid Principle: one governing message, supported by a few MECE argument groups — no overlap, no gaps. Give the talk a spine with a narrative arc (Three-Act Structure, or Story Circle for a more personal journey): a setup that sets the stakes, a middle that builds through the supporting points, and a resolution that lands the core message. Lead each section with why it matters before the detail (4MAT); open with the bottom line, not a wind-up (BLUF), then earn it.
 
 Produce a plan, not slides: the one-sentence core message, the audience, the arc, and per section the single takeaway plus its evidence and rough timing. Work one part at a time — propose the core message and audience first, check them, then the arc, then fill the sections; stop and wait between steps instead of dumping a full deck. If the speaker says "just draft it", give the whole outline at once. Don't announce the method — let it shape the plan, not the talk about it.
+
+# Prompt — Sonderregel „Issues als Textdateien"
+
+Einmal zu Beginn dem LLM geben, damit die Konvention für die ganze Session gilt.
+
+Ersetzt echte GitHub-Issues durch versionierte Textdateien im Repo.
+
+## Prompt (zum Kopieren)
+
+Wir arbeiten in diesem Projekt ohne GitHub Issues. Lege Issues stattdessen als
+
+Textdateien an und halte dich strikt an diese Konvention:
+
+- Ein Issue = eine Datei unter `src/docs/issues/`, benannt `issue-<NNNN>-<slug>.adoc`
+
+  (fortlaufende vierstellige Nummer, Titel als Kleinschreib-Slug).
+
+- Jede Issue-Datei enthält: ID, Titel, Typ (EPIC/Story/Bug), Status
+
+  (open/in-progress/closed), Priorität (MoSCoW), zugehörige Use-Case-/BR-IDs,
+
+  Beschreibung, Akzeptanzkriterien (Gherkin), Abhängigkeiten (IDs anderer Issues).
+
+- Neue Arbeit: erst die Issue-Datei anlegen, dann implementieren. Verweise im Code und in
+
+  den Tests auf die Issue-ID.
+
+- Ist ein Issue fertig (alle Akzeptanzkriterien grün), setze den Status auf `closed` und
+
+  verschiebe die Datei nach `src/docs/issues/closed/`.
+
+- `src/docs/issues/` enthält damit immer nur die offenen Issues, `src/docs/issues/closed/`
+
+  das Archiv der erledigten.
+
+Bestätige die Konvention kurz und lege den Ordner `src/docs/issues/` an, bevor wir mit
+
+dem ersten Issue starten.
+
+## Vorlage für eine Issue-Datei (Referenz)
+
+```asciidoc
+
+= Issue 0001: Checkout eines Gegenstands
+
+:issue-id: 0001
+
+:type: Story
+
+:status: open
+
+:priority: Must
+
+:refs: UC-Checkout, BR-003, BR-004
+
+== Beschreibung
+
+Ein berechtigtes Mitglied leiht einen verfügbaren Gegenstand aus. Kaution wird eingezogen.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+
+----
+
+Given ein verfügbarer Gegenstand und ein berechtigtes Mitglied
+
+When das Mitglied den Gegenstand ausleiht
+
+Then wird die Ausleihe angelegt und die Kaution eingezogen
+
+----
+
+== Abhängigkeiten
+
+- 0000 (Katalog-Verwaltung)
+
+```

@@ -1,0 +1,44 @@
+= Issue 0603: Wartung abschließen
+:issue-id: 0603
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-06, BR-25, BR-26
+
+== Beschreibung
+
+Als Wart schließe ich eine Wartung ab, sobald ein wartungsfälliger Gegenstand repariert ist.
+Diese Aktion setzt den Nutzungszähler auf null und den Gegenstand auf „verfügbar" (BR-25).
+Hat die Kategorie eine Warteschlange, wird der Gegenstand stattdessen reserviert (BR-30 gilt analog).
+
+=== REST-API
+
+`POST /gegenstaende/{gegenstandId}/wartung-abschliessen`
+
+Ausgabe HTTP 200: Gegenstand mit Zustand "verfügbar" oder "reserviert", Nutzungszähler = 0.
+Fehler HTTP 422: Gegenstand nicht wartungsfällig.
+
+=== CLI
+
+`leihgut wartung abschliessen --gegenstand uuid`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given wartungsfälliger Gegenstand ohne Vormerkungen
+When POST /gegenstaende/{id}/wartung-abschliessen
+Then HTTP 200, Gegenstand = "verfügbar", Nutzungszähler = 0
+
+Given wartungsfälliger Gegenstand mit Vormerkung für Kategorie
+When Wartung abgeschlossen
+Then Gegenstand = "reserviert" für erstes Mitglied der Warteschlange, Nutzungszähler = 0
+
+Given verfügbarer Gegenstand (nicht wartungsfällig)
+When POST .../wartung-abschliessen
+Then HTTP 422
+----
+
+== Abhängigkeiten
+
+* 0602 (Wartungsfälligkeit), 0703 (Reservierung)

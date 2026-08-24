@@ -1,0 +1,34 @@
+= Issue 0902: Audit-Eintrag für Zustandswechsel eines Gegenstands
+:issue-id: 0902
+:type: Story
+:status: open
+:priority: Should
+:refs: QA Nachvollziehbarkeit
+
+== Beschreibung
+
+Jeder Zustandswechsel eines Gegenstands (verfügbar → ausgeliehen, ausgeliehen → in Prüfung, etc.)
+erzeugt einen Audit-Eintrag, damit die Zustandshistorie nachvollziehbar ist.
+
+Felder: Gegenstand-ID, Altzustand, Neuzustand, Zeitstempel, Auslöser (Ausleihe-ID, Protokoll-ID oder Wart-Aktion).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand G wechselt von "verfügbar" nach "ausgeliehen"
+When Ausleihe angelegt
+Then Audit-Eintrag: GegenstandId=G, von="verfügbar", nach="ausgeliehen", AusleiheId=X
+
+Given Gegenstand G wechselt nach Prüfung zu "wartungsfällig"
+When Prüfprotokoll abgeschlossen
+Then Audit-Eintrag: von="in_Prüfung", nach="wartungsfällig", ProtokollId=Y
+
+Given alle Zustandswechsel von G
+When GET /gegenstaende/{id}/zustandshistorie
+Then vollständige chronologische Liste der Übergänge
+----
+
+== Abhängigkeiten
+
+* 0302, 0401, 0402, 0603 (alle Quellen von Zustandswechseln)

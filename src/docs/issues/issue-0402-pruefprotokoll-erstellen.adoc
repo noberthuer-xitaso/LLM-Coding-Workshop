@@ -1,0 +1,75 @@
+= Issue 0402: Prüfprotokoll erstellen
+:issue-id: 0402
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-04, BR-14, BR-15, BR-16, BR-17, BR-18, BR-23, BR-24, BR-30, BR-32
+
+== Beschreibung
+
+Als Wart erstelle ich ein Prüfprotokoll für einen Gegenstand, der sich „in Prüfung" befindet.
+Das Protokoll schließt die Ausleihe ab (BR-15), legt den Kautionsabzug fest und setzt den Nachzustand des Gegenstands (BR-17, BR-18).
+Nach der Prüfung erhöht sich der Nutzungszähler um eins (BR-23).
+Erreicht der Zähler das Wartungsintervall, wird der Gegenstand wartungsfällig statt verfügbar (BR-24).
+Liegt eine Vormerkung vor und der Nachzustand ist „verfügbar", wird der Gegenstand reserviert (BR-30).
+Ist der Nachzustand „wartungsfällig", bleibt die Warteschlange unberührt (BR-32).
+
+=== REST-API
+
+`POST /ausleihen/{ausleiheId}/pruefprotokoll`
+
+Eingabe:
+[source,json]
+----
+{
+  "wartId": "uuid-...",
+  "kautionsabzug": 15,
+  "nachzustand": "verfügbar",
+  "begruendung": "Kleiner Kratzer am Gehäuse"
+}
+----
+
+Ausgabe HTTP 201: Prüfprotokoll-Objekt mit ID, Zeitstempel, allen Feldern.
+Fehler HTTP 404: Ausleihe nicht gefunden.
+Fehler HTTP 422: Ausleihe nicht im Status "in_Prüfung", Abzug > Kaution (BR-21), ungültiger Nachzustand.
+
+=== CLI
+
+`leihgut pruefprotokoll erstellen --ausleihe uuid --abzug 15 --nachzustand verfügbar`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand "in Prüfung", hinterlegte Kaution 60 Euro
+When POST .../pruefprotokoll mit Abzug 0, Nachzustand "verfügbar"
+Then HTTP 201, Ausleihe abgeschlossen, Kaution freigegeben, Gegenstand "verfügbar", Nutzungszähler +1
+
+Given Gegenstand mit Nutzungszähler 9, Wartungsintervall 10
+When Prüfprotokoll mit Nachzustand "verfügbar" erstellt
+Then Gegenstand wechselt zu "wartungsfällig" (BR-24), keine Reservierung
+
+Given Prüfprotokoll mit Abzug 80 bei Kaution 60
+When POST .../pruefprotokoll
+Then HTTP 422 (BR-21)
+
+Given Gegenstand in Prüfung, Nachzustand "verfügbar", Vormerkung für Kategorie vorhanden
+When Prüfprotokoll erstellt
+Then Gegenstand = "reserviert" für erstes Mitglied der Warteschlange (BR-30)
+
+Given Prüfprotokoll mit Nachzustand "wartungsfällig"
+When Prüfprotokoll erstellt, offene Vormerkungen in der Kategorie vorhanden
+Then Gegenstand = "wartungsfällig", Warteschlange unverändert (BR-32)
+
+Given Prüfprotokoll mit Nachzustand "ausgemustert"
+When Prüfprotokoll erstellt
+Then Gegenstand = "ausgemustert" (Endzustand)
+----
+
+== Abhängigkeiten
+
+* 0401 (Rückgabe, Gegenstand in Prüfung)
+* 0502 (Kautionsabzug und -freigabe)
+* 0601, 0602 (Nutzungszähler, Wartungsfälligkeit)
+* 0703 (Reservierung nach Freigabe)
+* 0901 (Audit-Eintrag)

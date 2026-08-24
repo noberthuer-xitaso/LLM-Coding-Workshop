@@ -1,0 +1,34 @@
+= Issue 0602: Wartungsfälligkeit nach Prüfprotokoll setzen
+:issue-id: 0602
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-24, BR-26
+
+== Beschreibung
+
+Erreicht der Nutzungszähler das Wartungsintervall der Kategorie nach Abschluss eines Prüfprotokolls,
+wechselt der Gegenstand in den Zustand „wartungsfällig" statt „verfügbar" (BR-24).
+Ein wartungsfälliger Gegenstand darf weder ausgegeben noch reserviert werden (BR-26).
+Eine bestehende Warteschlange bleibt unverändert (BR-32).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand mit Wartungsintervall 10, Nutzungszähler 9
+When Prüfprotokoll mit Nachzustand "verfügbar" erstellt
+Then Gegenstand = "wartungsfällig" (Zähler nach Increment = 10 = Intervall, BR-24)
+
+Given wartungsfälliger Gegenstand, Nachzustand-Anforderung "verfügbar" im Protokoll
+When System den tatsächlichen Zustand bestimmt
+Then der gesetzte Zustand ist "wartungsfällig" (Wartungsregel hat Vorrang)
+
+Given wartungsfälliger Gegenstand mit Vormerkungen
+When Wartungsfälligkeit gesetzt
+Then bleibt Warteschlange unverändert, keine Reservierung (BR-32)
+----
+
+== Abhängigkeiten
+
+* 0601 (Nutzungszähler), 0402 (Prüfprotokoll), 0700 (Warteschlange unverändert)

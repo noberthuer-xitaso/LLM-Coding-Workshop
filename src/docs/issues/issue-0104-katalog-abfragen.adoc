@@ -1,0 +1,41 @@
+= Issue 0104: Katalog abfragen
+:issue-id: 0104
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-01
+
+== Beschreibung
+
+Als Thekendienst oder Mitglied frage ich den Katalog ab, um Gegenstände und deren aktuellen Zustand zu sehen.
+
+=== REST-API
+
+`GET /kategorien` — Liste aller Kategorien.
+`GET /kategorien/{id}` — Einzelne Kategorie.
+`GET /gegenstaende` — Liste aller Gegenstände (optional filterbar nach Zustand, Kategorie).
+`GET /gegenstaende/{id}` — Einzelner Gegenstand mit aktuellem Zustand, Nutzungszähler, Kaution.
+
+Ausgabe HTTP 200: JSON-Liste oder Einzelobjekt.
+Fehler HTTP 404: Nicht gefunden.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given drei Gegenstände, zwei verfügbar und einer ausgeliehen
+When GET /gegenstaende?zustand=verfügbar
+Then werden genau zwei Gegenstände zurückgegeben
+
+Given ein Gegenstand mit Nutzungszähler 7
+When GET /gegenstaende/{id}
+Then enthält die Antwort Nutzungszähler = 7 und den aktuellen Zustand
+
+Given eine nicht vorhandene ID
+When GET /gegenstaende/{id}
+Then HTTP 404
+----
+
+== Abhängigkeiten
+
+* 0101, 0102

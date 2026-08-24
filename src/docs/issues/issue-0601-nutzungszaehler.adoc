@@ -1,0 +1,29 @@
+= Issue 0601: Nutzungszähler bei Ausleihenabschluss erhöhen
+:issue-id: 0601
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-23, BR-24
+
+== Beschreibung
+
+Jede abgeschlossene Ausleihe erhöht den Nutzungszähler des Gegenstands um eins (BR-23).
+Diese Story implementiert die Zählerlogik, die beim Abschluss eines Prüfprotokolls ausgelöst wird.
+Der Zähler ist im Gegenstand-Objekt sichtbar.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand mit Nutzungszähler 5
+When Prüfprotokoll abgeschlossen (Nachzustand != ausgemustert/verloren)
+Then Nutzungszähler = 6
+
+Given Gegenstand ausgemustert
+When GET /gegenstaende/{id}
+Then Nutzungszähler bleibt auf dem Stand des letzten Protokolls (kein Zähler-Increment bei Ausmusterung)
+----
+
+== Abhängigkeiten
+
+* 0402 (Prüfprotokoll)

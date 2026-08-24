@@ -1,0 +1,34 @@
+= Issue 0705: Eigene Vormerkungen abfragen
+:issue-id: 0705
+:type: Story
+:status: open
+:priority: Should
+:refs: UC-05
+
+== Beschreibung
+
+Als Mitglied sehe ich meine aktiven Vormerkungen und Reservierungen,
+damit ich weiß, für welche Kategorien ich in der Warteschlange stehe und ob eine Reservierung auf mich wartet.
+
+=== REST-API
+
+`GET /mitglieder/{mitgliedId}/vormerkungen`
+
+Ausgabe HTTP 200: Liste mit Kategorie, Eingangszeit, Status (wartend/reserviert), ggf. Reservierungsfrist.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M mit einer Vormerkung für K1 (wartend) und einer Reservierung für K2
+When GET /mitglieder/M/vormerkungen
+Then werden beide zurückgegeben mit korrektem Status
+
+Given Mitglied M ohne Vormerkungen
+When GET /mitglieder/M/vormerkungen
+Then leere Liste (HTTP 200)
+----
+
+== Abhängigkeiten
+
+* 0701, 0703

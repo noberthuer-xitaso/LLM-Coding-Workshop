@@ -1,0 +1,36 @@
+= Issue 0304: Laufende Ausleihen abfragen
+:issue-id: 0304
+:type: Story
+:status: open
+:priority: Should
+:refs: UC-01
+
+== Beschreibung
+
+Als Thekendienst sehe ich alle laufenden Ausleihen eines Mitglieds,
+damit ich den Überblick über Ausleihlimit, Überfälligkeit und Sperrstatus habe.
+
+=== REST-API
+
+`GET /mitglieder/{mitgliedId}/ausleihen` — Alle Ausleihen (filterbar nach Status).
+`GET /ausleihen/{ausleiheId}` — Einzelne Ausleihe.
+`GET /ausleihen?status=aktiv` — Alle aktiven Ausleihen im System (Wart-Ansicht).
+
+Ausgabe HTTP 200: Liste mit Ausleihe-ID, Gegenstand, Rückgabefrist, Zustand, Kaution.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M mit zwei aktiven Ausleihen
+When GET /mitglieder/M/ausleihen?status=aktiv
+Then werden genau zwei Ausleihen zurückgegeben
+
+Given eine überfällige Ausleihe
+When GET /ausleihen/{id}
+Then enthält die Antwort ein Flag "ueberfaellig: true"
+----
+
+== Abhängigkeiten
+
+* 0302

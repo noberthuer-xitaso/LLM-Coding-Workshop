@@ -1,0 +1,41 @@
+= Issue 0200: Einweisungen verwalten
+:issue-id: 0200
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-09, BR-08
+
+== Beschreibung
+
+Bestimmte Kategorien sind einweisungspflichtig (BR-02).
+Bevor ein Mitglied einen solchen Gegenstand ausleihen darf, muss eine dokumentierte Einweisung für die Kategorie vorliegen (BR-08).
+Einweisungen hängen an der Person, nicht am Gegenstand.
+
+Dieses EPIC umfasst das Dokumentieren, Abfragen und Widerrufen von Einweisungen über die REST-API.
+
+== Enthaltene Stories
+
+* Issue 0201 — Einweisung für Mitglied dokumentieren
+* Issue 0202 — Einweisungen eines Mitglieds abfragen
+* Issue 0203 — Einweisung widerrufen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied ohne Einweisung
+When eine Einweisung für eine Kategorie dokumentiert wird
+Then ist die Einweisung für das Mitglied gespeichert und abrufbar
+
+Given ein Mitglied mit Einweisung für Kategorie X
+When eine Einweisung für dieselbe Kategorie erneut angelegt wird
+Then wird eine bereits vorhandene Einweisung nicht doppelt gespeichert
+
+Given ein Mitglied mit Einweisung
+When die Einweisung widerrufen wird
+Then darf das Mitglied Gegenstände dieser Kategorie nicht mehr ausleihen
+----
+
+== Abhängigkeiten
+
+* 0100 (Kategorie muss existieren)

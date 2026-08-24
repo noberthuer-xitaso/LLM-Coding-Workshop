@@ -1,0 +1,40 @@
+= Issue 0703: Reservierung bei Gegenstandsfreigabe
+:issue-id: 0703
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-05, BR-30, BR-31, BR-32, BR-33
+
+== Beschreibung
+
+Wird ein Gegenstand nach Prüfung verfügbar (Nachzustand „verfügbar") und liegt eine Vormerkung für die Kategorie vor,
+wird er automatisch für das erste Mitglied der Warteschlange reserviert (BR-30).
+Ist dieses Mitglied gesperrt, wird es übersprungen; sein Platz bleibt erhalten (BR-33).
+Ist der Nachzustand „wartungsfällig", entsteht keine Reservierung; die Warteschlange bleibt bestehen (BR-32).
+
+Diese Logik wird beim Abschluss des Prüfprotokolls (0402) und beim Wartungsabschluss (0603) ausgelöst.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand K-001 wird verfügbar, Warteschlange [M1, M2]
+When Prüfprotokoll abgeschlossen
+Then K-001 = "reserviert" für M1, M1 aus Warteschlange entfernt
+
+Given Gegenstand K-001 wird verfügbar, Warteschlange [gesperrtes M1, M2]
+When Prüfprotokoll abgeschlossen
+Then M1 übersprungen, K-001 = "reserviert" für M2; M1 bleibt in Warteschlange (BR-33)
+
+Given Gegenstand K-001 wird verfügbar, alle Mitglieder in der Warteschlange gesperrt
+When Prüfprotokoll abgeschlossen
+Then K-001 = "verfügbar", alle Mitglieder bleiben in Warteschlange
+
+Given Gegenstand K-001 wird wartungsfällig, Warteschlange [M1]
+When Prüfprotokoll abgeschlossen
+Then K-001 = "wartungsfällig", Warteschlange unverändert [M1] (BR-32)
+----
+
+== Abhängigkeiten
+
+* 0701 (Vormerkung/Warteschlange), 0402 (Prüfprotokoll), 0603 (Wartungsabschluss), 0800 (Sperrstatus)

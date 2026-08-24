@@ -1,0 +1,66 @@
+= Issue 0301: Ausgabefähigkeit eines Gegenstands prüfen
+:issue-id: 0301
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-01, BR-05, BR-06, BR-07, BR-08, BR-26
+
+== Beschreibung
+
+Als Thekendienst prüfe ich, ob ein Gegenstand an ein bestimmtes Mitglied ausgegeben werden darf —
+bevor ich die eigentliche Ausleihe anlege.
+Diese Prüfung soll in unter 300 ms antworten (QA Antwortzeit).
+
+Geprüfte Bedingungen:
+. Zustand des Gegenstands: „verfügbar" oder „reserviert für dieses Mitglied" (BR-05)
+. Ausleihlimit: Mitglied hat weniger als 3 laufende Ausleihen (BR-06)
+. Sperre: Mitglied ist nicht gesperrt (BR-07)
+. Einweisung: Bei einweisungspflichtigem Gegenstand liegt Einweisung für die Kategorie vor (BR-08)
+
+=== REST-API
+
+`GET /gegenstaende/{gegenstandId}/ausgabefaehigkeit?mitgliedId={id}`
+
+Ausgabe HTTP 200:
+[source,json]
+----
+{
+  "darfAusgegeben": true,
+  "ablehnungsgruende": []
+}
+----
+
+Bei Ablehnung: `darfAusgegeben: false` mit Liste der Ablehnungsgründe (BR-IDs).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given verfügbarer Gegenstand, ungesperrtes Mitglied, < 3 Ausleihen, Einweisung vorhanden
+When GET .../ausgabefaehigkeit
+Then darfAusgegeben = true
+
+Given wartungsfälliger Gegenstand
+When Ausgabefähigkeit geprüft wird
+Then darfAusgegeben = false, Ablehnungsgrund enthält BR-05/BR-26
+
+Given Mitglied mit 3 laufenden Ausleihen
+When Ausgabefähigkeit geprüft wird
+Then darfAusgegeben = false, Ablehnungsgrund enthält BR-06
+
+Given gesperrtes Mitglied
+When Ausgabefähigkeit geprüft wird
+Then darfAusgegeben = false, Ablehnungsgrund enthält BR-07
+
+Given einweisungspflichtiger Gegenstand, Mitglied ohne Einweisung
+When Ausgabefähigkeit geprüft wird
+Then darfAusgegeben = false, Ablehnungsgrund enthält BR-08
+
+Given Aufruf bei 400 Gegenständen und 800 Mitgliedern
+When Ausgabefähigkeit 100-mal abgefragt wird
+Then Antwort am 95. Perzentil unter 300 ms (QA Antwortzeit)
+----
+
+== Abhängigkeiten
+
+* 0102, 0201, 0302 (Ausleihlimit), 0800 (Sperre)

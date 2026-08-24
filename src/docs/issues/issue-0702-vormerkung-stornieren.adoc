@@ -1,0 +1,40 @@
+= Issue 0702: Vormerkung stornieren
+:issue-id: 0702
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-05, BR-27
+
+== Beschreibung
+
+Als Mitglied oder Thekendienst storniere ich eine Vormerkung, wenn das Mitglied seinen Platz in der Warteschlange aufgeben möchte.
+Die nächste Vormerkung in der Warteschlange rückt auf.
+
+=== REST-API
+
+`DELETE /vormerkungen/{vormerkungId}`
+
+Ausgabe HTTP 204: Vormerkung gelöscht.
+Fehler HTTP 404: Vormerkung nicht gefunden.
+Fehler HTTP 422: Stornierung einer bereits eingelösten Reservierung.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M hat Vormerkung V für Kategorie K
+When DELETE /vormerkungen/V
+Then HTTP 204 und V ist nicht mehr in der Warteschlange
+
+Given Vormerkung wurde bereits in eine Reservierung umgewandelt
+When DELETE /vormerkungen/V
+Then HTTP 422 (Reservierung muss separat verfallen oder abgeholt werden)
+
+Given Warteschlange [A, B, C], B storniert
+When B storniert
+Then Warteschlange = [A, C]
+----
+
+== Abhängigkeiten
+
+* 0701 (Vormerkung)

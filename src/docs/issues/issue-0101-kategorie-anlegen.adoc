@@ -1,0 +1,54 @@
+= Issue 0101: Kategorie anlegen
+:issue-id: 0101
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-01, BR-02
+
+== Beschreibung
+
+Als Wart lege ich eine neue Kategorie an, damit Gegenstände dieser Art inventarisiert und verliehen werden können.
+Eine Kategorie definiert Leihdauer (Tage), Wartungsintervall (Ausleihen) und Einweisungspflicht (ja/nein).
+
+=== REST-API
+
+`POST /kategorien`
+
+Eingabe:
+[source,json]
+----
+{
+  "name": "Bohrhammer",
+  "leihdauerTage": 7,
+  "wartungsintervall": 50,
+  "einweisungspflichtig": true
+}
+----
+
+Ausgabe HTTP 201: Kategorie-Objekt mit generierter ID.
+Fehler HTTP 422: Name fehlt oder doppelt, Leihdauer ≤ 0, Wartungsintervall ≤ 0.
+
+=== CLI
+
+`leihgut kategorie anlegen --name "Bohrhammer" --leihdauer 7 --wartungsintervall 50 --einweisung`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given keine Kategorie "Bohrhammer" existiert
+When POST /kategorien mit Name "Bohrhammer", Leihdauer 7, Wartungsintervall 50, Einweisung true
+Then HTTP 201 und Kategorie ist abrufbar mit diesen Parametern
+
+Given eine Kategorie "Bohrhammer" existiert bereits
+When erneut POST /kategorien mit Name "Bohrhammer"
+Then HTTP 422 (Name nicht eindeutig, BR-01 analog)
+
+Given Leihdauer = 0
+When POST /kategorien
+Then HTTP 422 (ungültiger Parameter)
+----
+
+== Abhängigkeiten
+
+Keine.

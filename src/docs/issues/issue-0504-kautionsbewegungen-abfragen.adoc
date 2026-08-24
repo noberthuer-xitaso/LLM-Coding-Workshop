@@ -1,0 +1,34 @@
+= Issue 0504: Kautionsbewegungen eines Mitglieds abfragen
+:issue-id: 0504
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-22
+
+== Beschreibung
+
+Als Thekendienst oder Mitglied rufe ich alle Kautionsbewegungen ab,
+um den Kautionssaldo nachvollziehen zu können (QA Korrektheit der Kaution).
+
+=== REST-API
+
+`GET /mitglieder/{mitgliedId}/kautionsbewegungen`
+
+Ausgabe HTTP 200: Liste mit Typ (Hinterlegung/Abzug/Freigabe/Einbehaltung), Betrag, Zeitstempel, Auslöser-Referenz.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M mit 3 abgeschlossenen Ausleihen
+When GET /mitglieder/M/kautionsbewegungen
+Then sind alle Hinterlegungs-, Abzugs- und Freigabe-Einträge vorhanden
+
+Given Mitglied M mit 50 abgeschlossenen Ausleihen
+When Kautionssaldo aus den Bewegungen berechnet wird
+Then Abweichung = 0 Cent (QA Korrektheit der Kaution)
+----
+
+== Abhängigkeiten
+
+* 0501, 0502, 0503, 0901

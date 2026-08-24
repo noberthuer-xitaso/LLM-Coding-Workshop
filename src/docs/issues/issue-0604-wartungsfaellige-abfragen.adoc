@@ -1,0 +1,38 @@
+= Issue 0604: Wartungsfällige Gegenstände abfragen
+:issue-id: 0604
+:type: Story
+:status: open
+:priority: Should
+:refs: UC-06, BR-26
+
+== Beschreibung
+
+Als Wart sehe ich alle Gegenstände, die gerade wartungsfällig sind,
+damit ich die Wartungsliste abarbeiten kann.
+
+=== REST-API
+
+`GET /gegenstaende?zustand=wartungsfällig`
+
+(Nutzung des bereits in 0104 definierten Filter-Parameters)
+
+=== CLI
+
+`leihgut gegenstand liste --zustand wartungsfaellig`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given zwei wartungsfällige und drei verfügbare Gegenstände
+When GET /gegenstaende?zustand=wartungsfällig
+Then werden genau zwei Gegenstände zurückgegeben
+
+Given kein wartungsfälliger Gegenstand
+When Abfrage
+Then leere Liste (HTTP 200)
+----
+
+== Abhängigkeiten
+
+* 0104 (Katalogabfrage), 0602 (Wartungsfälligkeit)

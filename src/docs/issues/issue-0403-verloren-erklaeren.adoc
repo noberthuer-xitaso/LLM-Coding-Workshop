@@ -1,0 +1,48 @@
+= Issue 0403: Gegenstand als verloren erklären
+:issue-id: 0403
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-07, BR-19
+
+== Beschreibung
+
+Als Wart erkläre ich einen Gegenstand als verloren, ohne dass eine körperliche Rückgabe vorausgegangen ist (BR-19).
+Ich erstelle ein Prüfprotokoll mit Nachzustand „verloren" direkt zur Ausleihe.
+Die Ausleihe wird abgeschlossen, die Kaution vollständig einbehalten und der Gegenstand ausgemustert.
+
+=== REST-API
+
+`POST /ausleihen/{ausleiheId}/pruefprotokoll` mit `nachzustand: "verloren"`
+
+(Gleicher Endpunkt wie 0402; der Nachzustand „verloren" ist auch ohne vorherige Rückgabe erlaubt.)
+
+Ausgabe HTTP 201: Prüfprotokoll mit Nachzustand „verloren".
+Fehler HTTP 422: Ausleihe bereits abgeschlossen.
+
+=== CLI
+
+`leihgut pruefprotokoll erstellen --ausleihe uuid --nachzustand verloren`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given eine laufende Ausleihe (Gegenstand "ausgeliehen", keine Rückgabe erfasst)
+When POST .../pruefprotokoll mit nachzustand "verloren"
+Then HTTP 201, Ausleihe abgeschlossen, Gegenstand = "ausgemustert", Kaution vollständig einbehalten
+
+Given abgeschlossene Ausleihe
+When POST .../pruefprotokoll mit nachzustand "verloren"
+Then HTTP 422 (Ausleihe bereits abgeschlossen)
+
+Given Verloren-Protokoll erstellt
+When Audit-Log abgefragt wird
+Then existiert ein Eintrag "Einbehaltung" mit vollem Kautionsbetrag und Protokoll-ID (BR-22)
+----
+
+== Abhängigkeiten
+
+* 0302 (Ausleihe aktiv)
+* 0503 (Kaution vollständig einbehalten)
+* 0402 (teilt Endpunkt mit Prüfprotokoll)

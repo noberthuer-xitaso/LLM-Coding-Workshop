@@ -1,0 +1,38 @@
+= Issue 0901: Audit-Eintrag für Kautionsbewegungen
+:issue-id: 0901
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-22, QA Nachvollziehbarkeit
+
+== Beschreibung
+
+Jede Kautionsbewegung erzeugt automatisch einen unveränderlichen Audit-Eintrag (BR-22).
+Auslöser: Hinterlegung (bei Ausleihe), Abzug und Freigabe (bei Prüfprotokoll), Einbehaltung (bei Verlust).
+
+Felder: Typ, Betrag in ganzen Euro, Zeitstempel, Auslöser-Referenz (Ausleihe-ID oder Prüfprotokoll-ID).
+
+Diese Story implementiert die Schreibseite des Audit-Logs für Kautionsbewegungen.
+Sie wird von Stories 0501, 0502, 0503 benötigt.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given eine Ausleihe wird angelegt (Kaution 60 Euro)
+When Hinterlegung ausgelöst
+Then Audit-Eintrag: Typ="Hinterlegung", Betrag=60, Zeitstempel≠null, AusleiheId=X
+
+Given Prüfprotokoll mit Abzug 20 Euro (Kaution 60)
+When Protokoll gespeichert
+Then Audit-Eintrag: Typ="Abzug", Betrag=20, ProtokollId=Y
+  UND Audit-Eintrag: Typ="Freigabe", Betrag=40, ProtokollId=Y
+
+Given Wart schließt Prüfung ab
+When GET /audit?ausleiheId=X
+Then Eintrag mit Zeitstempel, Betrag, Auslöser und Verweis auf Prüfprotokoll vorhanden (QA Nachvollziehbarkeit)
+----
+
+== Abhängigkeiten
+
+* 0302 (Ausleihe), 0402 (Prüfprotokoll)

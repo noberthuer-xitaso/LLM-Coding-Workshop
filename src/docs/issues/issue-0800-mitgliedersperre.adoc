@@ -1,0 +1,48 @@
+= Issue 0800: Mitgliedersperre
+:issue-id: 0800
+:type: EPIC
+:status: open
+:priority: Must
+:refs: BR-34, BR-35, BR-36
+
+== Beschreibung
+
+Ein Mitglied ist gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist (BR-34).
+Überfällig bedeutet: Die Rückgabefrist liegt vor dem heutigen Datum und der Gegenstand ist nicht zurückgegeben (BR-35).
+Die Sperre endet, wenn alle überfälligen Ausleihen durch ein Prüfprotokoll abgeschlossen sind (BR-36).
+
+Die Sperre ist ein berechneter Zustand — sie wird nicht explizit gesetzt, sondern aus dem aktuellen Datenstand abgeleitet.
+Ein gesperrtes Mitglied darf nicht ausleihen (BR-07) und keine Reservierung erhalten (BR-33, EPIC-0700).
+
+Dieses EPIC umfasst den Sperr-Status-Check sowie dessen Auswirkungen auf Ausleihe und Reservierung.
+
+== Enthaltene Stories
+
+* Issue 0801 — Mitglied automatisch sperren bei Überfälligkeit
+* Issue 0802 — Mitgliedersperre aufheben nach Prüfungsabschluss
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied mit einer Ausleihe, deren Rückgabefrist gestern war
+When der Sperrstatus abgefragt wird
+Then ist das Mitglied gesperrt (BR-34, BR-35)
+
+Given ein Mitglied mit einer überfälligen und einer fristgerechten Ausleihe
+When der Sperrstatus abgefragt wird
+Then ist das Mitglied gesperrt (eine überfällige Ausleihe reicht)
+
+Given ein gesperrtes Mitglied
+When für alle überfälligen Ausleihen ein Prüfprotokoll abgeschlossen wird
+Then ist das Mitglied nicht mehr gesperrt (BR-36)
+
+Given ein gesperrtes Mitglied
+When eine Ausleihe beantragt wird
+Then wird die Ausgabe abgelehnt (BR-07)
+----
+
+== Abhängigkeiten
+
+* 0300 (Rückgabefrist aus Ausleihe)
+* 0400 (Prüfprotokoll beendet Sperre)

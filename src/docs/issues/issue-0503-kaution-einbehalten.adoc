@@ -1,0 +1,29 @@
+= Issue 0503: Kaution vollständig einbehalten bei Verlust
+:issue-id: 0503
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-19, BR-22
+
+== Beschreibung
+
+Wird ein Gegenstand als verloren erklärt (UC-07), wird die Kaution vollständig einbehalten.
+Es gibt keinen Freigabe-Eintrag.
+Ein Audit-Eintrag „Einbehaltung" mit vollem Betrag, Zeitstempel und Protokoll-ID wird erstellt (BR-22).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given hinterlegte Kaution 70 Euro, Prüfprotokoll mit Nachzustand "verloren"
+When Protokoll gespeichert
+Then Audit-Eintrag "Einbehaltung 70 Euro" mit Protokoll-ID, kein Freigabe-Eintrag
+
+Given Verloren-Protokoll
+When Kautionsbewegungen abgefragt werden
+Then Saldo = 0 Euro (vollständig einbehalten)
+----
+
+== Abhängigkeiten
+
+* 0403 (Verloren-Protokoll), 0501 (hinterlegte Kaution), 0901 (Audit)

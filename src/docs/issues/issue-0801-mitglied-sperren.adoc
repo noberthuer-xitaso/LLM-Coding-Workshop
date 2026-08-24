@@ -1,0 +1,39 @@
+= Issue 0801: Mitglied automatisch sperren bei Überfälligkeit
+:issue-id: 0801
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-34, BR-35
+
+== Beschreibung
+
+Ein Mitglied gilt als gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist (BR-34).
+Überfällig: Rückgabefrist liegt vor dem heutigen Datum, Gegenstand nicht zurückgegeben (BR-35).
+Die Sperre ist kein persistenter Zustand, sondern wird aus den laufenden Ausleihen berechnet.
+
+Der Sperrstatus fließt in die Ausgabefähigkeitsprüfung (0301) und die Reservierungslogik (0703) ein.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M hat eine Ausleihe mit Rückgabefrist gestern (nicht zurückgegeben)
+When Sperrstatus abgefragt
+Then M ist gesperrt (BR-34, BR-35)
+
+Given Mitglied M mit einer überfälligen und zwei fristgerechten Ausleihen
+When Sperrstatus abgefragt
+Then M ist gesperrt (eine reicht)
+
+Given Mitglied M mit Ausleihe, Frist morgen
+When Sperrstatus abgefragt
+Then M ist nicht gesperrt
+
+Given gesperrtes Mitglied M
+When Ausleihe beantragt
+Then HTTP 422 (BR-07)
+----
+
+== Abhängigkeiten
+
+* 0302 (Rückgabefrist aus Ausleihe), 0304 (Ausleihen abfragen)

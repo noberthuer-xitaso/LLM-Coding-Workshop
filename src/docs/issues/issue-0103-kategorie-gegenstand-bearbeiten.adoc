@@ -1,0 +1,41 @@
+= Issue 0103: Kategorie und Gegenstand bearbeiten
+:issue-id: 0103
+:type: Story
+:status: open
+:priority: Should
+:refs: UC-08, BR-01, BR-02, BR-03
+
+== Beschreibung
+
+Als Wart passe ich Kategorie-Parameter oder den Wiederbeschaffungswert eines Gegenstands an.
+Änderungen an einer Kategorie (Leihdauer, Wartungsintervall) wirken sich auf neue Ausleihen aus; laufende Ausleihen behalten ihre ursprüngliche Frist.
+Eine Änderung des Wiederbeschaffungswerts eines Gegenstands ändert die Kaution für zukünftige Ausleihen, nicht für laufende.
+
+=== REST-API
+
+`PATCH /kategorien/{id}` — Leihdauer, Wartungsintervall, Einweisungspflicht änderbar.
+`PATCH /gegenstaende/{id}` — Wiederbeschaffungswert änderbar.
+
+Ausgabe HTTP 200: Aktualisiertes Objekt.
+Fehler HTTP 404: Nicht gefunden. HTTP 422: Ungültige Werte.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Kategorie "Bohrhammer" mit Leihdauer 7
+When PATCH /kategorien/{id} mit Leihdauer 14
+Then gibt GET /kategorien/{id} Leihdauer 14 zurück
+
+Given eine laufende Ausleihe mit Frist in 3 Tagen bei Leihdauer-Änderung
+When die Leihdauer der Kategorie geändert wird
+Then bleibt die Rückgabefrist der laufenden Ausleihe unverändert
+
+Given Gegenstand mit Wiederbeschaffungswert 300
+When PATCH /gegenstaende/{id} mit Wert 500
+Then berechnet das System die neue Kaution als 100 Euro (Maximum)
+----
+
+== Abhängigkeiten
+
+* 0101, 0102

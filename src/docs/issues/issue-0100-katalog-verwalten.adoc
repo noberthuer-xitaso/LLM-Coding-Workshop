@@ -1,0 +1,50 @@
+= Issue 0100: Katalog verwalten
+:issue-id: 0100
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-08, BR-01, BR-02, BR-03, BR-04
+
+== Beschreibung
+
+Der Katalog enthält alle Kategorien und Gegenstände der Bibliothek der Dinge.
+Kategorien definieren die fachlichen Parameter (Leihdauer, Wartungsintervall, Einweisungspflicht).
+Gegenstände sind physische Exemplare mit eigener Inventarnummer, Wiederbeschaffungswert und berechnetem Kautionsbetrag.
+
+Dieses EPIC umfasst das Anlegen, Bearbeiten und Abfragen von Kategorien und Gegenständen über REST-API und CLI.
+
+== Enthaltene Stories
+
+* Issue 0101 — Kategorie anlegen
+* Issue 0102 — Gegenstand anlegen
+* Issue 0103 — Kategorie und Gegenstand bearbeiten
+* Issue 0104 — Katalog abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given das System enthält keine Kategorien
+When eine Kategorie mit gültigen Parametern angelegt wird
+Then ist die Kategorie im Katalog abrufbar
+
+Given eine Kategorie existiert
+When ein Gegenstand mit Inventarnummer und Wiederbeschaffungswert angelegt wird
+Then ist der Gegenstand im Katalog mit berechnetem Kautionsbetrag abrufbar
+
+Given ein Gegenstand mit Wiederbeschaffungswert 300 Euro
+When der Kautionsbetrag berechnet wird
+Then beträgt er 60 Euro (20% von 300, innerhalb [5, 100])
+
+Given ein Gegenstand mit Wiederbeschaffungswert 10 Euro
+When der Kautionsbetrag berechnet wird
+Then beträgt er 5 Euro (Minimum)
+
+Given ein Gegenstand mit Wiederbeschaffungswert 1000 Euro
+When der Kautionsbetrag berechnet wird
+Then beträgt er 100 Euro (Maximum)
+----
+
+== Abhängigkeiten
+
+Keine (Fundament des Systems).

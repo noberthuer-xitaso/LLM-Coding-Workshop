@@ -1,0 +1,35 @@
+= Issue 0202: Einweisungen eines Mitglieds abfragen
+:issue-id: 0202
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-09, BR-08
+
+== Beschreibung
+
+Als Thekendienst sehe ich auf einen Blick, für welche Kategorien ein Mitglied eine Einweisung besitzt,
+damit ich beim Ausleihvorgang die Einweisungspflicht prüfen kann.
+
+=== REST-API
+
+`GET /mitglieder/{mitgliedId}/einweisungen`
+
+Ausgabe HTTP 200: Liste der Einweisungen mit Kategorie-ID, Kategoriename und Datum.
+Fehler HTTP 404: Mitglied nicht gefunden.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M mit zwei Einweisungen (Kategorie A und B)
+When GET /mitglieder/M/einweisungen
+Then werden beide Einweisungen zurückgegeben
+
+Given Mitglied M ohne Einweisungen
+When GET /mitglieder/M/einweisungen
+Then wird eine leere Liste zurückgegeben (HTTP 200)
+----
+
+== Abhängigkeiten
+
+* 0201

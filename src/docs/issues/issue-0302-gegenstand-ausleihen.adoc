@@ -1,0 +1,60 @@
+= Issue 0302: Gegenstand ausleihen
+:issue-id: 0302
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-01, BR-05, BR-06, BR-07, BR-08, BR-09, BR-20, BR-22
+
+== Beschreibung
+
+Als Thekendienst leihe ich einen Gegenstand an ein Mitglied aus.
+Das System prüft alle Ausgabebedingungen (BR-05..08), legt die Ausleihe an,
+hinterlegt die Kaution (BR-09, BR-20) und setzt die Rückgabefrist (BR-09).
+Bei einer Reservierung des Mitglieds wechselt der Gegenstand von „reserviert" zu „ausgeliehen".
+
+=== REST-API
+
+`POST /ausleihen`
+
+Eingabe:
+[source,json]
+----
+{
+  "gegenstandId": "uuid-...",
+  "mitgliedId": "uuid-...",
+  "thekendienst": "karim"
+}
+----
+
+Ausgabe HTTP 201: Ausleihe-Objekt mit ID, Rückgabefrist, Kautionsbetrag, Zustand "aktiv".
+Fehler HTTP 422: Ausgabebedingung nicht erfüllt (mit Ablehnungsgrund).
+Fehler HTTP 404: Gegenstand oder Mitglied nicht gefunden.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given verfügbarer Gegenstand, berechtigtes Mitglied
+When POST /ausleihen
+Then HTTP 201, Ausleihe angelegt, Gegenstand "ausgeliehen", Kaution hinterlegt, Frist = heute + Leihdauer
+
+Given Gegenstand reserviert für Mitglied M
+When POST /ausleihen mit mitgliedId = M
+Then HTTP 201, Reservierung aufgehoben, Gegenstand "ausgeliehen"
+
+Given Gegenstand reserviert für Mitglied A
+When POST /ausleihen mit mitgliedId = B (anderes Mitglied)
+Then HTTP 422 (Gegenstand nicht verfügbar für B, BR-05)
+
+Given Mitglied mit 3 laufenden Ausleihen
+When POST /ausleihen
+Then HTTP 422 (BR-06)
+
+Given Gegenstand mit Zustand "wartungsfällig"
+When POST /ausleihen
+Then HTTP 422 (BR-05, BR-26)
+----
+
+== Abhängigkeiten
+
+* 0301 (Ausgabefähigkeit), 0501 (Kaution hinterlegen), 0900 (Audit-Eintrag)

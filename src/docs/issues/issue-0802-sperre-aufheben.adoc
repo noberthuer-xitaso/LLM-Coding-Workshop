@@ -1,0 +1,34 @@
+= Issue 0802: Mitgliedersperre aufheben nach Prüfungsabschluss
+:issue-id: 0802
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-36
+
+== Beschreibung
+
+Die Sperre endet, wenn für alle überfälligen Ausleihen eines Mitglieds das Prüfprotokoll abgeschlossen ist (BR-36).
+Da die Sperre berechnet wird, ergibt sich dies automatisch nach Abschluss des letzten Prüfprotokolls.
+
+Diese Story stellt sicher, dass der Sperrstatus nach Prüfungsabschluss korrekt aktualisiert wird.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given gesperrtes Mitglied M mit zwei überfälligen Ausleihen A1 und A2
+When Prüfprotokoll für A1 abgeschlossen
+Then M bleibt gesperrt (A2 noch offen)
+
+Given gesperrtes Mitglied M mit überfälliger Ausleihe A1
+When Prüfprotokoll für A1 abgeschlossen
+Then M ist nicht mehr gesperrt (BR-36)
+
+Given vormals gesperrtes, jetzt entsperrtes Mitglied M
+When Ausleihe beantragt
+Then Ausgabefähigkeit wird nur noch anhand der restlichen Bedingungen geprüft
+----
+
+== Abhängigkeiten
+
+* 0801 (Sperre), 0402 (Prüfprotokoll)

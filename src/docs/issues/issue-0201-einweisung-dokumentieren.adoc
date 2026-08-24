@@ -1,0 +1,54 @@
+= Issue 0201: Einweisung für Mitglied dokumentieren
+:issue-id: 0201
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-09, BR-08
+
+== Beschreibung
+
+Als Wart dokumentiere ich, dass ein Mitglied eine Einweisung für eine einweisungspflichtige Kategorie erhalten hat.
+Ohne diese Einweisung darf das Mitglied Gegenstände dieser Kategorie nicht ausleihen (BR-08).
+
+=== REST-API
+
+`POST /mitglieder/{mitgliedId}/einweisungen`
+
+Eingabe:
+[source,json]
+----
+{
+  "kategorieId": "uuid-...",
+  "datum": "2026-08-24",
+  "eingewiesenVon": "wart-id"
+}
+----
+
+Ausgabe HTTP 201: Einweisungsobjekt mit ID, Mitglied-ID, Kategorie-ID, Datum.
+Fehler HTTP 404: Mitglied oder Kategorie nicht gefunden.
+Fehler HTTP 422: Einweisung für diese Kategorie bereits vorhanden.
+
+=== CLI
+
+`leihgut einweisung anlegen --mitglied uuid --kategorie uuid --datum 2026-08-24`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M und Kategorie K (einweisungspflichtig)
+When POST /mitglieder/M/einweisungen mit kategorieId K
+Then HTTP 201 und Einweisung ist abrufbar
+
+Given Mitglied M hat bereits Einweisung für Kategorie K
+When erneut POST /mitglieder/M/einweisungen mit kategorieId K
+Then HTTP 422 (keine Doppel-Einweisung)
+
+Given Mitglied M ohne Einweisung für einweisungspflichtige Kategorie K
+When Ausleihe für Gegenstand aus K beantragt wird
+Then wird die Ausgabe abgelehnt (BR-08)
+----
+
+== Abhängigkeiten
+
+* 0101 (Kategorie), 0102 (Gegenstand)

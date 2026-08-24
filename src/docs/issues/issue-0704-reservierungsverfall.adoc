@@ -1,0 +1,35 @@
+= Issue 0704: Reservierungsverfall nach drei Tagen
+:issue-id: 0704
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-31
+
+== Beschreibung
+
+Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung (BR-31).
+Nach dem Verfall geht der Gegenstand an das nächste Mitglied der Warteschlange oder wird verfügbar.
+
+Da das System kein Hintergrundjob-Framework voraussetzt, wird der Verfall bei jeder relevanten Abfrage oder Aktion geprüft.
+Die austauschbare Datumsquelle (PRD Rahmenbedingungen) macht diesen Verfall testbar.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand G reserviert für M1 am Tag 0, Warteschlange [M2]
+When Tag 4 (Verfall eingetreten), System prüft Reservierungen
+Then G = "reserviert" für M2, M1 nicht mehr in Warteschlange
+
+Given Gegenstand G reserviert für M1 am Tag 0, keine weitere Vormerkung
+When Tag 4, System prüft Reservierungen
+Then G = "verfügbar"
+
+Given Gegenstand G reserviert, Tag 2
+When System prüft Reservierungen
+Then Reservierung bleibt bestehen (noch innerhalb von 3 Tagen)
+----
+
+== Abhängigkeiten
+
+* 0703 (Reservierung), 0701 (Warteschlange)

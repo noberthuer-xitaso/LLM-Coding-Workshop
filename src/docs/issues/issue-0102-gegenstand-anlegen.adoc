@@ -1,0 +1,58 @@
+= Issue 0102: Gegenstand anlegen
+:issue-id: 0102
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-01, BR-03, BR-04
+
+== Beschreibung
+
+Als Wart lege ich einen neuen Gegenstand mit Inventarnummer, Kategorie und Wiederbeschaffungswert an.
+Das System berechnet die Kaution automatisch (BR-04): 20 % des Wiederbeschaffungswerts, gerundet, mindestens 5 Euro, höchstens 100 Euro.
+Der Anfangszustand ist „verfügbar".
+
+=== REST-API
+
+`POST /gegenstaende`
+
+Eingabe:
+[source,json]
+----
+{
+  "inventarnummer": "WZ-042",
+  "kategorieId": "uuid-...",
+  "wiederbeschaffungswert": 350
+}
+----
+
+Ausgabe HTTP 201: Gegenstand mit berechneter Kaution und Zustand "verfügbar".
+Fehler HTTP 422: Inventarnummer nicht eindeutig, Kategorie nicht gefunden, Wert ≤ 0.
+
+=== CLI
+
+`leihgut gegenstand anlegen --nr WZ-042 --kategorie uuid --wert 350`
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Kategorie "Bohrhammer" existiert
+When POST /gegenstaende mit Inventarnummer "WZ-042", Wert 350
+Then HTTP 201, Kaution = 70 Euro (20% von 350), Zustand = "verfügbar"
+
+Given Wiederbeschaffungswert 10 Euro
+When Gegenstand angelegt wird
+Then Kaution = 5 Euro (Minimum, BR-04)
+
+Given Wiederbeschaffungswert 1000 Euro
+When Gegenstand angelegt wird
+Then Kaution = 100 Euro (Maximum, BR-04)
+
+Given Inventarnummer "WZ-042" existiert bereits
+When erneut POST mit gleicher Inventarnummer
+Then HTTP 422 (BR-01)
+----
+
+== Abhängigkeiten
+
+* 0101 (Kategorie muss existieren)

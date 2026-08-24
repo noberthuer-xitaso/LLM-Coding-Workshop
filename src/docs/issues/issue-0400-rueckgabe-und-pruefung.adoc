@@ -1,0 +1,60 @@
+= Issue 0400: Rückgabe und Prüfung
+:issue-id: 0400
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-03, UC-04, BR-12, BR-13, BR-14, BR-15, BR-16, BR-17, BR-18, BR-19
+
+== Beschreibung
+
+Die Rückgabe eines Gegenstands an der Theke versetzt ihn in den Zustand „in Prüfung" — sie beendet die Ausleihe nicht (BR-12).
+Auffälligkeiten werden als Freitext erfasst; die Kautionsentscheidung liegt beim Wart (BR-13, BR-14).
+
+Der Wart erstellt ein Prüfprotokoll mit Kautionsabzug und Nachzustand.
+Das Prüfprotokoll schließt die Ausleihe ab (BR-15).
+Der Wart kann einen Gegenstand auch ohne körperliche Rückgabe als verloren erklären (BR-19).
+
+Dieses EPIC umfasst REST-API und CLI für Rücknahme, Prüfprotokoll und Verlorenmeldung.
+
+== Enthaltene Stories
+
+* Issue 0401 — Gegenstand zurücknehmen
+* Issue 0402 — Prüfprotokoll erstellen
+* Issue 0403 — Gegenstand als verloren erklären
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein ausgeliehener Gegenstand
+When die Rückgabe erfasst wird
+Then wechselt der Gegenstand in den Zustand "in Prüfung" und die Ausleihe bleibt offen
+
+Given ein Gegenstand in Prüfung und eine laufende Ausleihe
+When der Wart ein Prüfprotokoll mit Nachzustand "verfügbar" und Abzug 0 erstellt
+Then wird die Ausleihe abgeschlossen, der Kautionsbetrag vollständig freigegeben und der Gegenstand verfügbar
+
+Given ein Gegenstand in Prüfung
+When der Wart ein Prüfprotokoll mit Kautionsabzug > 0 erstellt
+Then wird der Abzug von der Kaution einbehalten und der Restbetrag freigegeben
+
+Given ein Gegenstand in Prüfung mit Nachzustand "wartungsfällig"
+When das Prüfprotokoll erstellt wird
+Then wechselt der Gegenstand in den Zustand "wartungsfällig"
+
+Given eine laufende Ausleihe
+When der Wart ein Prüfprotokoll mit Nachzustand "verloren" erstellt
+Then wird die Kaution vollständig einbehalten, die Ausleihe abgeschlossen und der Gegenstand ausgemustert
+
+Given ein Prüfprotokoll mit Abzug 80 Euro bei hinterlegter Kaution von 60 Euro
+When das Protokoll gespeichert werden soll
+Then wird es mit HTTP 422 abgelehnt (BR-21)
+----
+
+== Abhängigkeiten
+
+* 0300 (Ausleihe muss existieren)
+* 0500 (Kautionsabzug und -freigabe)
+* 0600 (Wartungsfälligkeit nach Prüfung)
+* 0700 (Reservierung bei Freigabe)
+* 0900 (Audit-Eintrag)

@@ -1,0 +1,63 @@
+= Issue 0300: Gegenstand ausleihen und verlängern
+:issue-id: 0300
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-01, UC-02, BR-05, BR-06, BR-07, BR-08, BR-09, BR-10, BR-11
+
+== Beschreibung
+
+Der Kernanwendungsfall der Bibliothek der Dinge: Ein Mitglied leiht einen Gegenstand aus.
+Alle Ausgabebedingungen (Zustand des Gegenstands, Ausleihlimit, Sperre, Einweisung) werden geprüft.
+Die Kaution wird hinterlegt, die Rückgabefrist gesetzt.
+
+Eine einmalige Verlängerung um die volle Leihdauer ist möglich, sofern keine Vormerkung für die Kategorie offen ist und die Ausleihe nicht überfällig ist.
+
+Dieses EPIC umfasst die REST-API-Endpunkte für Ausgabe und Verlängerung.
+
+== Enthaltene Stories
+
+* Issue 0301 — Ausgabefähigkeit eines Gegenstands prüfen
+* Issue 0302 — Gegenstand ausleihen
+* Issue 0303 — Ausleihe verlängern
+* Issue 0304 — Laufende Ausleihen abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein verfügbarer Gegenstand und ein berechtigtes Mitglied ohne Sperre und mit gültiger Einweisung
+When das Mitglied den Gegenstand ausleiht
+Then wird die Ausleihe angelegt, die Kaution hinterlegt und die Rückgabefrist gesetzt
+
+Given ein Mitglied mit drei laufenden Ausleihen
+When eine weitere Ausleihe beantragt wird
+Then wird die Ausgabe mit HTTP 422 abgelehnt (BR-06)
+
+Given ein gesperrtes Mitglied
+When eine Ausleihe beantragt wird
+Then wird die Ausgabe abgelehnt (BR-07)
+
+Given ein einweisungspflichtiger Gegenstand und ein Mitglied ohne Einweisung
+When eine Ausleihe beantragt wird
+Then wird die Ausgabe abgelehnt (BR-08)
+
+Given eine laufende Ausleihe ohne Überfälligkeit und ohne Vormerkung für die Kategorie
+When das Mitglied die Ausleihe verlängert
+Then wird die Rückgabefrist um die volle Leihdauer verlängert (BR-10)
+
+Given eine laufende Ausleihe mit offener Vormerkung für die Kategorie
+When das Mitglied die Verlängerung beantragt
+Then wird die Verlängerung abgelehnt (BR-11)
+
+Given eine bereits verlängerte Ausleihe
+When das Mitglied erneut verlängern will
+Then wird die Verlängerung abgelehnt (BR-10)
+----
+
+== Abhängigkeiten
+
+* 0100 (Katalog: Gegenstand und Kategorie)
+* 0200 (Einweisungen)
+* 0500 (Kaution hinterlegen)
+* 0800 (Sperre prüfen)

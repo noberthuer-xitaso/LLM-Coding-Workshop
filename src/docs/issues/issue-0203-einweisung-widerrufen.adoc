@@ -1,0 +1,37 @@
+= Issue 0203: Einweisung widerrufen
+:issue-id: 0203
+:type: Story
+:status: open
+:priority: Should
+:refs: UC-09, BR-08
+
+== Beschreibung
+
+Als Wart widerrufe ich eine Einweisung eines Mitglieds für eine Kategorie,
+wenn die Einweisung fehlerhaft dokumentiert wurde oder die Berechtigung entzogen werden muss.
+Nach dem Widerruf darf das Mitglied Gegenstände dieser Kategorie nicht mehr ausleihen (BR-08).
+Laufende Ausleihen sind davon nicht betroffen.
+
+=== REST-API
+
+`DELETE /mitglieder/{mitgliedId}/einweisungen/{einweisungId}`
+
+Ausgabe HTTP 204: Einweisung gelöscht.
+Fehler HTTP 404: Einweisung nicht gefunden.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M hat Einweisung E für Kategorie K
+When DELETE /mitglieder/M/einweisungen/E
+Then HTTP 204 und GET gibt die Einweisung nicht mehr zurück
+
+Given Mitglied M nach Widerruf der Einweisung für Kategorie K
+When eine Ausleihe für Gegenstand aus K beantragt wird
+Then wird die Ausgabe abgelehnt (BR-08)
+----
+
+== Abhängigkeiten
+
+* 0201

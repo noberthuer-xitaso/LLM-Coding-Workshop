@@ -1,0 +1,56 @@
+= Issue 0600: Wartung und Ausmusterung
+:issue-id: 0600
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-06, UC-07, BR-23, BR-24, BR-25, BR-26
+
+== Beschreibung
+
+Wartungsfälligkeit entsteht durch Nutzung, nicht durch Zeitablauf (PRD).
+Jede abgeschlossene Ausleihe erhöht den Nutzungszähler des Gegenstands um eins (BR-23).
+Erreicht der Zähler das Wartungsintervall der Kategorie, wird der Gegenstand nach dem Prüfprotokoll wartungsfällig (BR-24).
+
+Ein wartungsfälliger Gegenstand wird nicht ausgegeben und nicht reserviert (BR-26).
+Der Wart schließt die Wartung als eigenständige Aktion ab, setzt den Zähler auf null und den Zustand auf verfügbar (BR-25).
+Die Ausmusterung erfolgt über ein Prüfprotokoll mit Nachzustand „ausgemustert" oder „verloren" (UC-07, BR-17, BR-19).
+
+Dieses EPIC umfasst REST-API und CLI für Nutzungszähler, Wartungsabschluss und Abfrage wartungsfälliger Gegenstände.
+
+== Enthaltene Stories
+
+* Issue 0601 — Nutzungszähler bei Ausleihenabschluss erhöhen
+* Issue 0602 — Wartungsfälligkeit nach Prüfprotokoll setzen
+* Issue 0603 — Wartung abschließen
+* Issue 0604 — Wartungsfällige Gegenstände abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Gegenstand mit Wartungsintervall 10 und Nutzungszähler 9
+When das Prüfprotokoll für die 10. Ausleihe erstellt wird
+Then wechselt der Gegenstand in den Zustand "wartungsfällig"
+
+Given ein wartungsfälliger Gegenstand
+When eine Ausleihe beantragt wird
+Then wird die Ausgabe abgelehnt (BR-26)
+
+Given ein wartungsfälliger Gegenstand
+When eine Vormerkung für die Kategorie angelegt wird
+Then wird die Reservierung nicht ausgelöst (BR-32)
+
+Given ein wartungsfälliger Gegenstand
+When der Wart "Wartung abschließen" ausführt
+Then wechselt der Gegenstand in den Zustand "verfügbar" und der Nutzungszähler wird auf 0 gesetzt
+
+Given ein wartungsfälliger Gegenstand mit offener Warteschlange
+When der Wart die Wartung abschließt
+Then wird der Gegenstand reserviert, nicht verfügbar (BR-30)
+----
+
+== Abhängigkeiten
+
+* 0100 (Kategorie mit Wartungsintervall)
+* 0400 (Prüfprotokoll setzt Wartungsfälligkeit)
+* 0700 (Reservierung nach Wartungsabschluss)

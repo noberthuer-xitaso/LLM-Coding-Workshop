@@ -1,0 +1,54 @@
+= Issue 0500: Kaution verwalten
+:issue-id: 0500
+:type: EPIC
+:status: open
+:priority: Must
+:refs: BR-04, BR-20, BR-21, BR-22
+
+== Beschreibung
+
+Die Kaution ist kein Preis, sondern ein verwahrter Betrag mit Rückgabeanspruch (PRD).
+Sie wird bei der Ausgabe hinterlegt (BR-20) und nach der Prüfung ganz oder teilweise freigegeben.
+Jede Kautionsbewegung — Hinterlegung, Abzug, Freigabe — erzeugt einen Audit-Eintrag (BR-22).
+
+Der Kautionsbetrag berechnet sich aus dem Wiederbeschaffungswert der Kategorie:
+20 % des Wiederbeschaffungswerts, kaufmännisch gerundet, mindestens 5 Euro, höchstens 100 Euro (BR-04).
+
+Dieses EPIC umfasst Kautionsberechnung, Bewegungsprotokoll und Abfrage.
+
+== Enthaltene Stories
+
+* Issue 0501 — Kaution bei Ausgabe hinterlegen
+* Issue 0502 — Kautionsabzug und -freigabe bei Prüfabschluss
+* Issue 0503 — Kaution vollständig einbehalten bei Verlust
+* Issue 0504 — Kautionsbewegungen eines Mitglieds abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Gegenstand mit Wiederbeschaffungswert 250 Euro (Kaution: 50 Euro)
+When die Ausleihe angelegt wird
+Then existiert ein Audit-Eintrag "Hinterlegung 50 Euro" mit Zeitstempel und Ausleihe-ID
+
+Given eine abgeschlossene Ausleihe mit Kautionsabzug 20 Euro bei Kaution 50 Euro
+When das Prüfprotokoll erstellt wird
+Then existiert ein Audit-Eintrag "Abzug 20 Euro" und ein Eintrag "Freigabe 30 Euro"
+
+Given eine Ausleihe mit hinterlegter Kaution 60 Euro
+When ein Prüfprotokoll mit Abzug 80 Euro gespeichert werden soll
+Then wird es mit HTTP 422 abgelehnt (BR-21, Abzug > Kaution)
+
+Given eine abgeschlossene Ausleihe mit Verlust-Protokoll
+When die Kaution abgefragt wird
+Then ist der Saldo 0 und die Volleinbehaltung als Audit-Eintrag nachvollziehbar
+
+Given ein Mitglied mit 50 abgeschlossenen Ausleihen
+When der Kautionssaldo aus den Bewegungseinträgen nachgerechnet wird
+Then beträgt die Abweichung 0 Cent (QA Korrektheit der Kaution)
+----
+
+== Abhängigkeiten
+
+* 0100 (Kategorie mit Wiederbeschaffungswert)
+* 0900 (Audit-Log)

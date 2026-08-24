@@ -1,0 +1,62 @@
+= Issue 0700: Vormerkung und Reservierung
+:issue-id: 0700
+:type: EPIC
+:status: open
+:priority: Must
+:refs: UC-05, BR-27, BR-28, BR-29, BR-30, BR-31, BR-32, BR-33
+
+== Beschreibung
+
+Eine Vormerkung ist kein Terminkalender, sondern ein Platz in einer Warteschlange (PRD).
+Sie gilt für eine Kategorie, nicht für einen einzelnen Gegenstand (BR-27).
+Pro Mitglied ist höchstens eine Vormerkung je Kategorie erlaubt (BR-28).
+Vormerkungen werden nach FIFO geordnet (BR-29).
+
+Wird ein Gegenstand nach Prüfung verfügbar und liegt eine Vormerkung vor, wird er für das erste Mitglied der Warteschlange reserviert (BR-30).
+Eine Reservierung verfällt nach drei Kalendertagen (BR-31).
+Gesperrte Mitglieder dürfen vormerken, werden aber beim Reservierungsversuch übersprungen und behalten ihren Platz (BR-33).
+
+Dieses EPIC umfasst REST-API für Anlegen, Stornieren und Abfragen von Vormerkungen sowie die automatische Reservierungslogik.
+
+== Enthaltene Stories
+
+* Issue 0701 — Vormerkung anlegen
+* Issue 0702 — Vormerkung stornieren
+* Issue 0703 — Reservierung bei Gegenstandsfreigabe
+* Issue 0704 — Reservierungsverfall nach drei Tagen
+* Issue 0705 — Eigene Vormerkungen abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied ohne Vormerkung für Kategorie X
+When eine Vormerkung für Kategorie X angelegt wird
+Then ist das Mitglied in der Warteschlange für Kategorie X
+
+Given ein Mitglied mit bestehender Vormerkung für Kategorie X
+When eine zweite Vormerkung für Kategorie X angelegt wird
+Then wird sie mit HTTP 422 abgelehnt (BR-28)
+
+Given ein Gegenstand der Kategorie X, der nach Prüfung verfügbar wird, und ein Mitglied an erster Stelle der Warteschlange
+When das Prüfprotokoll abgeschlossen wird
+Then wird der Gegenstand für dieses Mitglied reserviert (BR-30)
+
+Given eine Reservierung, die drei Kalendertage alt ist
+When das System die Verfallsprüfung ausführt
+Then wechselt der Gegenstand zum nächsten Mitglied in der Warteschlange oder wird verfügbar (BR-31)
+
+Given ein gesperrtes Mitglied an erster Stelle der Warteschlange
+When eine Reservierung für dieses Mitglied entstehen würde
+Then wird das Mitglied übersprungen, sein Platz bleibt erhalten, das nächste Mitglied erhält die Reservierung (BR-33)
+
+Given ein Gegenstand, der nach Prüfung wartungsfällig wird, mit offener Warteschlange
+When das Prüfprotokoll abgeschlossen wird
+Then bleibt die Warteschlange unverändert und es entsteht keine Reservierung (BR-32)
+----
+
+== Abhängigkeiten
+
+* 0100 (Kategorie)
+* 0400 (Prüfprotokoll löst Reservierung aus)
+* 0800 (Sperre eines Mitglieds)

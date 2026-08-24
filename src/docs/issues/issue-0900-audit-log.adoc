@@ -1,0 +1,48 @@
+= Issue 0900: Audit-Log
+:issue-id: 0900
+:type: EPIC
+:status: open
+:priority: Must
+:refs: BR-22, QA Nachvollziehbarkeit
+
+== Beschreibung
+
+Das Audit-Log macht jede Kautionsbewegung und jeden relevanten Zustandswechsel nachvollziehbar.
+Jede Kautionsbewegung erzeugt einen Eintrag mit Zeitstempel, Betrag und Auslöser (BR-22).
+Qualitätsziel: Nach einer Prüfung mit Abzug muss ein Audit-Eintrag mit Zeitstempel, Betrag, Auslöser und Verweis auf das Prüfprotokoll existieren (QA Nachvollziehbarkeit).
+
+Das Audit-Log ist unveränderlich: Einträge werden nur angelegt, nie geändert oder gelöscht.
+
+Dieses EPIC umfasst Kautionsbewegungseinträge, Zustandswechseleinträge und die Abfrage-API.
+
+== Enthaltene Stories
+
+* Issue 0901 — Audit-Eintrag für Kautionsbewegungen
+* Issue 0902 — Audit-Eintrag für Zustandswechsel eines Gegenstands
+* Issue 0903 — Audit-Log abfragen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given eine Ausleihe wird angelegt
+When die Kaution hinterlegt wird
+Then existiert ein Audit-Eintrag mit Typ "Hinterlegung", Betrag, Zeitstempel und Ausleihe-ID (BR-22)
+
+Given ein Prüfprotokoll mit Kautionsabzug wird erstellt
+When das Protokoll gespeichert wird
+Then existieren ein Audit-Eintrag "Abzug" und ein Audit-Eintrag "Freigabe" mit Zeitstempel, Betrag und Protokoll-ID (BR-22, QA)
+
+Given ein Mitglied mit 50 abgeschlossenen Ausleihen
+When alle Audit-Einträge für dieses Mitglied summiert werden
+Then ist die Differenz zwischen hinterlegten und freigegebenen/einbehaltenen Beträgen 0 Cent (QA Korrektheit)
+
+Given Audit-Einträge für einen Gegenstand
+When das Audit-Log per API abgefragt wird
+Then werden Einträge mit Zeitstempel, Typ, Betrag und Auslöser-Referenz zurückgegeben
+----
+
+== Abhängigkeiten
+
+* 0100 (Gegenstand-ID, Kategorie)
+* Wird von 0300, 0400, 0500 konsumiert

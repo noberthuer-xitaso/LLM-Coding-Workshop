@@ -1,0 +1,41 @@
+= Issue 0903: Audit-Log abfragen
+:issue-id: 0903
+:type: Story
+:status: open
+:priority: Should
+:refs: BR-22
+
+== Beschreibung
+
+Als Wart oder Thekendienst frage ich das Audit-Log ab, um Kautionsbewegungen und Zustandswechsel
+eines Mitglieds oder Gegenstands nachzuvollziehen.
+
+=== REST-API
+
+`GET /audit?mitgliedId={id}` — Alle Kautionsbewegungen eines Mitglieds.
+`GET /audit?gegenstandId={id}` — Alle Kautionsbewegungen und Zustandswechsel eines Gegenstands.
+`GET /audit?ausleiheId={id}` — Alle Ereignisse zu einer Ausleihe.
+
+Ausgabe HTTP 200: Liste, chronologisch sortiert, mit Typ, Betrag (ggf. null), Zeitstempel, Auslöser-Referenz.
+Paginierung optional.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Ausleihe mit Hinterlegung, Rückgabe und Prüfprotokoll
+When GET /audit?ausleiheId={id}
+Then Einträge: Hinterlegung, Abzug/Freigabe — alle mit Zeitstempel und Referenz
+
+Given leeres Audit für ein Mitglied
+When GET /audit?mitgliedId={id}
+Then HTTP 200, leere Liste
+
+Given Audit-Eintrag
+When DELETE /audit/{id} versucht
+Then HTTP 405 (Audit-Log ist unveränderlich)
+----
+
+== Abhängigkeiten
+
+* 0901, 0902

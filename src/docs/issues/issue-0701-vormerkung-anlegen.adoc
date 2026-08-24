@@ -1,0 +1,55 @@
+= Issue 0701: Vormerkung anlegen
+:issue-id: 0701
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-05, BR-27, BR-28, BR-29, BR-33
+
+== Beschreibung
+
+Als Mitglied merke ich eine Kategorie vor, um den nächsten verfügbaren Gegenstand dieser Kategorie zu erhalten.
+Eine Vormerkung gilt für eine Kategorie, nicht für einen Gegenstand (BR-27).
+Pro Mitglied ist höchstens eine Vormerkung je Kategorie erlaubt (BR-28).
+Gesperrte Mitglieder dürfen vormerken (BR-33).
+
+=== REST-API
+
+`POST /vormerkungen`
+
+Eingabe:
+[source,json]
+----
+{
+  "mitgliedId": "uuid-...",
+  "kategorieId": "uuid-..."
+}
+----
+
+Ausgabe HTTP 201: Vormerkung mit ID, Eingangszeit (Grundlage für FIFO-Reihenfolge, BR-29).
+Fehler HTTP 422: Zweite Vormerkung für gleiche Kategorie (BR-28).
+Fehler HTTP 404: Mitglied oder Kategorie nicht gefunden.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Mitglied M ohne Vormerkung für Kategorie K
+When POST /vormerkungen
+Then HTTP 201, Vormerkung mit Eingangszeit gespeichert
+
+Given Mitglied M mit Vormerkung für Kategorie K
+When erneut POST /vormerkungen für Kategorie K
+Then HTTP 422 (BR-28)
+
+Given gesperrtes Mitglied M
+When POST /vormerkungen für Kategorie K
+Then HTTP 201 (gesperrte Mitglieder dürfen vormerken, BR-33)
+
+Given zwei Mitglieder A (09:00 Uhr) und B (09:05 Uhr) vormerken Kategorie K
+When Warteschlange abgefragt wird
+Then A steht vor B (FIFO, BR-29)
+----
+
+== Abhängigkeiten
+
+* 0100 (Kategorie), 0800 (Sperre-Status — kein Blocking, nur Info)

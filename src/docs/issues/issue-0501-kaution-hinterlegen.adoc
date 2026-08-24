@@ -1,0 +1,40 @@
+= Issue 0501: Kaution bei Ausgabe hinterlegen
+:issue-id: 0501
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-04, BR-09, BR-20, BR-22
+
+== Beschreibung
+
+Beim Anlegen einer Ausleihe wird die Kaution automatisch hinterlegt.
+Der Betrag ergibt sich aus dem Wiederbeschaffungswert des Gegenstands (BR-04): 20 %, gerundet, min 5, max 100 Euro.
+Ein Audit-Eintrag „Hinterlegung" wird mit Zeitstempel, Betrag und Ausleihe-ID erstellt (BR-22).
+
+Diese Story implementiert die Kautionslogik, die in der Ausleihe-Story (0302) ausgelöst wird.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given Gegenstand mit Wiederbeschaffungswert 400 Euro (Kaution = 80 Euro)
+When Ausleihe angelegt
+Then Kautionssaldo des Mitglieds = 80 Euro hinterlegt, Audit-Eintrag "Hinterlegung 80 Euro" vorhanden
+
+Given Gegenstand mit Wiederbeschaffungswert 20 Euro
+When Ausleihe angelegt
+Then Kaution = 5 Euro (Minimum, BR-04)
+
+Given Wiederbeschaffungswert 700 Euro
+When Ausleihe angelegt
+Then Kaution = 100 Euro (Maximum, BR-04)
+
+Given Wiederbeschaffungswert 33 Euro
+When Ausleihe angelegt
+Then Kaution = 7 Euro (20% = 6,6 → gerundet auf 7, BR-04)
+----
+
+== Abhängigkeiten
+
+* 0302 (wird durch Ausleihe ausgelöst)
+* 0901 (Audit-Eintrag)

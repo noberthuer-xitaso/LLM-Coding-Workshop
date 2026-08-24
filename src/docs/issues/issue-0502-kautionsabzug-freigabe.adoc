@@ -1,0 +1,37 @@
+= Issue 0502: Kautionsabzug und -freigabe bei Prüfabschluss
+:issue-id: 0502
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-15, BR-20, BR-21, BR-22
+
+== Beschreibung
+
+Beim Abschluss eines Prüfprotokolls wird die Kaution ganz oder teilweise freigegeben.
+Der Abzug darf nicht höher sein als die hinterlegte Kaution (BR-21).
+Für Abzug und Freigabe werden separate Audit-Einträge erstellt (BR-22).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given hinterlegte Kaution 60 Euro, Prüfprotokoll mit Abzug 0
+When Protokoll gespeichert
+Then Audit-Eintrag "Freigabe 60 Euro" mit Protokoll-ID
+
+Given hinterlegte Kaution 60 Euro, Prüfprotokoll mit Abzug 20 Euro
+When Protokoll gespeichert
+Then Audit-Eintrag "Abzug 20 Euro" und "Freigabe 40 Euro" mit Protokoll-ID
+
+Given hinterlegte Kaution 60 Euro, Prüfprotokoll mit Abzug 60 Euro (volle Einbehaltung)
+When Protokoll gespeichert
+Then Audit-Eintrag "Abzug 60 Euro", kein Freigabe-Eintrag
+
+Given hinterlegte Kaution 60 Euro, Prüfprotokoll mit Abzug 80 Euro
+When Protokoll gespeichert werden soll
+Then HTTP 422 (BR-21, Abzug > Kaution)
+----
+
+== Abhängigkeiten
+
+* 0402 (Prüfprotokoll), 0501 (hinterlegte Kaution), 0901 (Audit)

@@ -1,0 +1,45 @@
+= Issue 0303: Ausleihe verlängern
+:issue-id: 0303
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-02, BR-10, BR-11, BR-22
+
+== Beschreibung
+
+Als Thekendienst verlängere ich eine laufende Ausleihe einmalig um die volle Leihdauer der Kategorie (BR-10).
+Eine Verlängerung ist nicht möglich, wenn für die Kategorie eine Vormerkung offen ist oder
+die Ausleihe bereits überfällig ist (BR-11).
+
+=== REST-API
+
+`POST /ausleihen/{ausleiheId}/verlaengerung`
+
+Ausgabe HTTP 200: Aktualisierte Ausleihe mit neuer Rückgabefrist und `verlaengert: true`.
+Fehler HTTP 404: Ausleihe nicht gefunden.
+Fehler HTTP 422: Verlängerung nicht erlaubt (mit Grund: bereits_verlaengert | vormerkung_offen | ueberfaellig).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given laufende Ausleihe, nicht verlängert, nicht überfällig, keine Vormerkung für Kategorie
+When POST /ausleihen/{id}/verlaengerung
+Then HTTP 200, neue Frist = alte Frist + Leihdauer, verlaengert = true
+
+Given bereits verlängerte Ausleihe
+When POST /ausleihen/{id}/verlaengerung
+Then HTTP 422 (BR-10, Grund: bereits_verlaengert)
+
+Given Ausleihe, Kategorie hat offene Vormerkung
+When POST /ausleihen/{id}/verlaengerung
+Then HTTP 422 (BR-11, Grund: vormerkung_offen)
+
+Given überfällige Ausleihe (Frist gestern)
+When POST /ausleihen/{id}/verlaengerung
+Then HTTP 422 (BR-11, Grund: ueberfaellig)
+----
+
+== Abhängigkeiten
+
+* 0302 (Ausleihe), 0700 (Vormerkung prüfen), 0800 (Überfälligkeit)

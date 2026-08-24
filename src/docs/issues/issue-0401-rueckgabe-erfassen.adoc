@@ -1,0 +1,55 @@
+= Issue 0401: Gegenstand zurücknehmen
+:issue-id: 0401
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-03, BR-12, BR-13
+
+== Beschreibung
+
+Als Thekendienst nehme ich einen zurückgebrachten Gegenstand an der Theke entgegen.
+Der Gegenstand wechselt in den Zustand „in Prüfung" (BR-12).
+Die Ausleihe bleibt offen — sie wird erst durch das Prüfprotokoll abgeschlossen.
+Auffälligkeiten werden als optionaler Freitext erfasst (BR-13); die Kautionsentscheidung liegt beim Wart.
+
+=== REST-API
+
+`POST /ausleihen/{ausleiheId}/rueckgabe`
+
+Eingabe:
+[source,json]
+----
+{
+  "thekendienst": "karim",
+  "auffaelligkeiten": "Gehäuse leicht beschädigt"
+}
+----
+
+Ausgabe HTTP 200: Ausleihe mit Status "in_Prüfung", Gegenstand mit Zustand "in_Prüfung".
+Fehler HTTP 404: Ausleihe nicht gefunden.
+Fehler HTTP 422: Gegenstand nicht im Zustand "ausgeliehen".
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ausgeliehener Gegenstand
+When POST /ausleihen/{id}/rueckgabe
+Then HTTP 200, Gegenstand = "in_Prüfung", Ausleihe-Status = "in_Prüfung", Kaution noch hinterlegt
+
+Given Rückgabe mit Auffälligkeiten-Freitext
+When POST /ausleihen/{id}/rueckgabe mit auffaelligkeiten
+Then Freitext wird gespeichert und ist abrufbar
+
+Given bereits zurückgegebener Gegenstand
+When erneut POST .../rueckgabe
+Then HTTP 422
+
+Given Ausleihe ohne körperliche Rückgabe (für Verlorenmeldung)
+When GET /ausleihen/{id}
+Then Status ist noch "aktiv" (Rückgabe muss explizit erfasst werden)
+----
+
+== Abhängigkeiten
+
+* 0302 (Ausleihe)
