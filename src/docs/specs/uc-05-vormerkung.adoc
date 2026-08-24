@@ -1,0 +1,687 @@
+= UC-05: Gegenstand vormerken
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+== Kontext
+
+Ein Mitglied kann einen Gegenstand einer Kategorie vormerken, wenn kein Exemplar dieser Kategorie aktuell verfügbar ist — oder auch dann, wenn eines verfügbar ist und es sicher haben möchte.
+Eine Vormerkung ist *kein Reservierungsdatum und kein gebuchter Zeitraum*.
+Sie ist ein *Platz in der Warteschlange* einer Kategorie (BR-27, BR-29).
+Eine Reservierung — d. h. die Zuteilung eines konkreten Gegenstands — entsteht erst, wenn ein Exemplar der Kategorie nach einer Prüfung verfügbar wird (BR-30).
+
+Referenzierte Geschäftsregeln: BR-27, BR-28, BR-29, BR-30, BR-31, BR-32, BR-33.
+
+---
+
+== Persona Use Case (Cockburn Fully Dressed)
+
+=== Übersicht
+
+[cols="1,3"]
+|===
+|Merkmal |Inhalt
+
+|Use-Case-ID
+|UC-05
+
+|Name
+|Gegenstand vormerken
+
+|Primary Actor
+|Sabine (Mitglied)
+
+|Supporting Actors
+|System (REST-API)
+
+|Stakeholder-Interessen
+a|
+* *Sabine* will sicher sein, dass sie den Gegenstand erhält, sobald er verfügbar wird, ohne wiederholt an der Theke nachfragen zu müssen.
+* *Karim* (Thekendienst) will auf Knopfdruck sehen, für wen ein zurückgegebener Gegenstand reserviert werden muss.
+* *Rolf* (Wart) will beim Abschluss einer Prüfung automatisch wissen, ob er einen Gegenstand reservieren oder freigeben soll.
+
+|Auslöser
+|Sabine möchte einen Gegenstand einer Kategorie vormerken, die entweder aktuell vollständig ausgeliehen oder für die sie sicher einen Platz sichern will.
+
+|Vorbedingungen
+a|
+1. Die Kategorie existiert im System.
+2. Sabines Mitgliedskonto ist im System vorhanden.
+3. Sabine hat für diese Kategorie noch keine offene Vormerkung (BR-28).
+
+|Nachbedingungen (Erfolg)
+a|
+1. Sabines Mitgliedskonto ist in der Warteschlange der Kategorie eingetragen.
+2. Sabines Position in der Warteschlange ist die letzte (FIFO, BR-29).
+3. Ist zum Zeitpunkt der Vormerkung ein Gegenstand der Kategorie im Zustand „verfügbar", wird dieser Gegenstand sofort für Sabine reserviert und die Vormerkung gilt als bedient (BR-30).
+4. Ist Sabine gesperrt, ist sie dennoch in der Warteschlange eingetragen; beim Aufrufen ihrer Reservierung wird diese übersprungen (BR-33).
+
+|Nachbedingungen (Fehlschlag)
+a|
+* Der Zustand des Systems bleibt unverändert.
+* Sabine erhält eine eindeutige Fehlermeldung.
+|===
+
+=== Hauptszenario
+
+[cols="^1,4,4"]
+|===
+|Schritt |Mitglied |System
+
+|1
+|Sabine ruft `POST /vormerkungen` mit ihrer `mitglied_id` und der gewünschten `kategorie_id` auf.
+|
+
+|2
+|
+|Das System prüft, ob die Kategorie existiert.
+
+|3
+|
+|Das System prüft, ob Sabine für diese Kategorie bereits eine Vormerkung hat (BR-28).
+
+|4
+|
+|Das System prüft, ob Sabine gesperrt ist (BR-33).
+
+|5
+|
+|Das System legt die Vormerkung an, weist ihr einen Zeitstempel zu und reiht Sabine als letztes Element in die Warteschlange der Kategorie ein (BR-29).
+
+|6
+|
+|Das System prüft, ob ein Gegenstand der Kategorie aktuell den Zustand „verfügbar" hat.
+
+|7a (kein verfügbarer Gegenstand)
+|
+|Das System gibt `201 Created` zurück mit der Vormerkungsressource. Position in der Schlange, Kategoriename und Hinweis „Keine sofortige Reservierung möglich" sind enthalten.
+
+|7b (verfügbarer Gegenstand vorhanden)
+|
+|Das System reserviert den Gegenstand für Sabine (Zustand → reserviert), setzt das Verfallsdatum auf heute + 3 Kalendertage (BR-31) und gibt `201 Created` zurück mit der Vormerkungsressource und dem Hinweis „Gegenstand sofort reserviert; Abholung bis <Datum>".
+|===
+
+=== Erweiterungen
+
+==== E1 — Sabine hat bereits eine Vormerkung für diese Kategorie (BR-28)
+
+[cols="^1,4,4"]
+|===
+|Schritt |Mitglied |System
+
+|3a
+|
+|Das System stellt fest, dass für `(mitglied_id, kategorie_id)` bereits eine Vormerkung existiert.
+
+|3b
+|
+|Das System gibt `409 Conflict` zurück. Antwortbody: `{ "fehler": "VORMERKUNG_BEREITS_VORHANDEN", "nachricht": "Für diese Kategorie besteht bereits eine Vormerkung." }` Der Anwendungsfall endet.
+|===
+
+==== E2 — Sabine ist gesperrt, darf aber trotzdem vormerken (BR-33)
+
+[cols="^1,4,4"]
+|===
+|Schritt |Mitglied |System
+
+|4a
+|
+|Das System stellt fest, dass Sabine gesperrt ist.
+
+|4b
+|
+|Das System legt die Vormerkung dennoch an (Schritt 5 im Hauptszenario). In der Antwort wird ein Warnhinweis mitgegeben: `"hinweis": "Ihr Konto ist gesperrt. Die Vormerkung wird registriert, eine entstehende Reservierung wird jedoch übersprungen. Ihr Platz in der Warteschlange bleibt erhalten."` Der Anwendungsfall wird in Schritt 6 fortgesetzt.
+|===
+
+==== E3 — Kategorie nicht gefunden
+
+[cols="^1,4,4"]
+|===
+|Schritt |Mitglied |System
+
+|2a
+|
+|Das System findet keine Kategorie mit der angegebenen `kategorie_id`.
+
+|2b
+|
+|Das System gibt `404 Not Found` zurück. Antwortbody: `{ "fehler": "KATEGORIE_NICHT_GEFUNDEN", "nachricht": "Die Kategorie existiert nicht." }` Der Anwendungsfall endet.
+|===
+
+==== E4 — Sabine ist gesperrt und Reservierung entsteht sofort
+
+Wenn in Schritt 6 ein verfügbarer Gegenstand vorhanden ist und Sabine gesperrt ist:
+
+[cols="^1,4,4"]
+|===
+|Schritt |Mitglied |System
+
+|6a
+|
+|Das System findet einen verfügbaren Gegenstand, stellt aber fest, dass Sabine gesperrt ist.
+
+|6b
+|
+|Das System überspringt Sabines Position für diese Reservierung und prüft, ob das nächste Mitglied in der Schlange vorhanden ist. Sabines Platz in der Warteschlange bleibt erhalten (BR-33). Falls kein weiteres Mitglied vorhanden: Gegenstand bleibt verfügbar.
+
+|6c
+|
+|Das System gibt `201 Created` zurück inklusive des Warnhinweises aus E2.
+|===
+
+---
+
+== System Use Cases (REST-API)
+
+Authentifizierung erfolgt über den Header `X-Role: mitglied | thekendienst`.
+Ein Login existiert nicht.
+Die `mitglied_id` wird als Pfad- oder Query-Parameter übergeben.
+
+=== SUC-05-01 — Vormerkung anlegen
+
+==== Endpunkt
+
+ POST /vormerkungen
+
+==== Request
+
+[source,http]
+----
+POST /vormerkungen HTTP/1.1
+Content-Type: application/json
+X-Role: mitglied
+
+{
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007"
+}
+----
+
+==== Felder
+
+[cols="1,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|string
+|ja
+|ID des Mitglieds, das vormerken möchte.
+
+|`kategorie_id`
+|string
+|ja
+|ID der Kategorie, für die vorgemerkt werden soll.
+|===
+
+==== Erfolgsantwort — `201 Created`
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0815",
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:34:00Z",
+  "position_in_schlange": 3,
+  "reservierung": null,
+  "hinweis": null
+}
+----
+
+Wenn sofort eine Reservierung entsteht (BR-30):
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0816",
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:34:00Z",
+  "position_in_schlange": 1,
+  "reservierung": {
+    "gegenstand_id": "INV-0044",
+    "reserviert_bis": "2026-09-04"
+  },
+  "hinweis": "Gegenstand sofort reserviert. Abholung bis 2026-09-04."
+}
+----
+
+Wenn Mitglied gesperrt (BR-33):
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0817",
+  "mitglied_id": "M-1099",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:40:00Z",
+  "position_in_schlange": 4,
+  "reservierung": null,
+  "hinweis": "Ihr Konto ist gesperrt. Die Vormerkung wird registriert, eine entstehende Reservierung wird jedoch übersprungen. Ihr Platz in der Warteschlange bleibt erhalten."
+}
+----
+
+==== Fehlerantworten
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Pflichtfelder fehlen oder haben ungültigen Typ.
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|`kategorie_id` existiert nicht (E3).
+
+|`409 Conflict`
+|`VORMERKUNG_BEREITS_VORHANDEN`
+|Mitglied hat bereits eine offene Vormerkung für diese Kategorie (BR-28, E1).
+|===
+
+---
+
+=== SUC-05-02 — Vormerkungen eines Mitglieds anzeigen
+
+==== Endpunkt
+
+ GET /vormerkungen?mitglied_id={mitglied_id}
+
+==== Request
+
+[source,http]
+----
+GET /vormerkungen?mitglied_id=M-1042 HTTP/1.1
+X-Role: mitglied
+----
+
+==== Erfolgsantwort — `200 OK`
+
+[source,json]
+----
+{
+  "mitglied_id": "M-1042",
+  "vormerkungen": [
+    {
+      "vormerkung_id": "VM-0815",
+      "kategorie_id": "KAT-007",
+      "kategorie_name": "Bohrhammer",
+      "eingangszeit": "2026-09-01T10:34:00Z",
+      "position_in_schlange": 3,
+      "reservierung": null
+    },
+    {
+      "vormerkung_id": "VM-0801",
+      "kategorie_id": "KAT-003",
+      "kategorie_name": "Lastenrad",
+      "eingangszeit": "2026-08-28T08:00:00Z",
+      "position_in_schlange": 1,
+      "reservierung": {
+        "gegenstand_id": "INV-0012",
+        "reserviert_bis": "2026-09-03"
+      }
+    }
+  ]
+}
+----
+
+Leere Liste, wenn keine Vormerkungen vorhanden:
+
+[source,json]
+----
+{
+  "mitglied_id": "M-1042",
+  "vormerkungen": []
+}
+----
+
+==== Fehlerantworten
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Query-Parameter `mitglied_id` fehlt.
+
+|`404 Not Found`
+|`MITGLIED_NICHT_GEFUNDEN`
+|`mitglied_id` existiert nicht.
+|===
+
+---
+
+=== SUC-05-03 — Vormerkung stornieren
+
+==== Endpunkt
+
+ DELETE /vormerkungen/{vormerkung_id}
+
+==== Request
+
+[source,http]
+----
+DELETE /vormerkungen/VM-0815 HTTP/1.1
+X-Role: mitglied
+----
+
+==== Erfolgsantwort — `204 No Content`
+
+Keine Antwortbody.
+
+Wenn für die stornierte Vormerkung eine aktive Reservierung bestand, wird diese ebenfalls aufgelöst.
+Der reservierte Gegenstand geht an das nächste Mitglied der Warteschlange (BR-31) oder wird verfügbar, wenn keine weitere Vormerkung vorliegt.
+
+==== Fehlerantworten
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`404 Not Found`
+|`VORMERKUNG_NICHT_GEFUNDEN`
+|`vormerkung_id` existiert nicht.
+
+|`403 Forbidden`
+|`ZUGRIFF_VERWEIGERT`
+|Die Vormerkung gehört nicht zum anfragenden Mitglied (nur relevant wenn `X-Role: mitglied`). Der Thekendienst darf alle Vormerkungen stornieren.
+|===
+
+---
+
+== Aktivitätsdiagramm
+
+[plantuml]
+----
+@startuml UC-05-Aktivitaet
+skinparam swimlaneWidth 280
+skinparam backgroundColor white
+skinparam activity {
+  BackgroundColor #F5F5F5
+  BorderColor #666666
+  DiamondBackgroundColor #FFFACD
+  DiamondBorderColor #999900
+}
+
+|Mitglied|
+start
+:POST /vormerkungen\n(mitglied_id, kategorie_id);
+
+|System|
+:Kategorie suchen;
+if (Kategorie gefunden?) then (nein)
+  :404 Not Found\nKATEGORIE_NICHT_GEFUNDEN;
+  stop
+endif
+
+:Prüfe: offene Vormerkung\nfür (mitglied_id, kategorie_id)?;
+if (Bereits vorgemerkt?) then (ja)
+  :409 Conflict\nVORMERKUNG_BEREITS_VORHANDEN;
+  stop
+endif
+
+:Prüfe: Mitglied gesperrt?;
+if (Gesperrt?) then (ja)
+  note right: BR-33: Darf vormerken,\nReservierung wird übersprungen
+endif
+
+:Vormerkung anlegen\nEingangszeit = jetzt;
+:In Warteschlange einreihen\n(FIFO — letzter Platz, BR-29);
+
+:Prüfe: verfügbarer Gegenstand\nder Kategorie vorhanden?;
+if (Gegenstand verfügbar?) then (ja)
+  if (Mitglied gesperrt?) then (ja)
+    :Reservierung überspringen\n(BR-33)\nNächstes Mitglied in Schlange prüfen;
+    :Platz in Schlange bleibt erhalten;
+    :201 Created\n+ Warnhinweis Sperre;
+  else (nein)
+    :Gegenstand reservieren\n(Zustand → reserviert)\nVerfallsdatum = heute + 3 Tage\n(BR-30, BR-31);
+    :201 Created\n+ Reservierungsdetails;
+  endif
+else (nein)
+  :201 Created\nPosition in Schlange;
+endif
+
+|Mitglied|
+:Antwort empfangen;
+stop
+
+@enduml
+----
+
+---
+
+== Akzeptanzkriterien (Gherkin)
+
+=== Szenario AC-05-01 — Vormerkung erfolgreich anlegen
+
+[source,gherkin]
+----
+Feature: UC-05 Gegenstand vormerken
+
+  Background:
+    Given die Kategorie "Bohrhammer" mit ID "KAT-007" existiert
+    And das Mitglied "M-1042" existiert und ist nicht gesperrt
+    And das Mitglied "M-1042" hat keine Vormerkung für "KAT-007"
+    And kein Gegenstand der Kategorie "KAT-007" ist aktuell verfügbar
+
+  Scenario: Vormerkung erfolgreich anlegen
+    When das Mitglied "M-1042" eine Vormerkung für Kategorie "KAT-007" anlegt
+    Then antwortet das System mit HTTP 201
+    And die Antwort enthält eine "vormerkung_id"
+    And die Antwort enthält "position_in_schlange" >= 1
+    And die Antwort enthält "reservierung": null
+    And das Mitglied "M-1042" ist in der Warteschlange der Kategorie "KAT-007" eingetragen
+----
+
+=== Szenario AC-05-02 — Zweite Vormerkung für gleiche Kategorie abgelehnt (BR-28)
+
+[source,gherkin]
+----
+  Scenario: Zweite Vormerkung für gleiche Kategorie wird abgelehnt
+    Given das Mitglied "M-1042" hat bereits eine offene Vormerkung für Kategorie "KAT-007"
+    When das Mitglied "M-1042" erneut eine Vormerkung für Kategorie "KAT-007" anlegt
+    Then antwortet das System mit HTTP 409
+    And die Antwort enthält "fehler": "VORMERKUNG_BEREITS_VORHANDEN"
+    And die Warteschlange der Kategorie "KAT-007" enthält das Mitglied "M-1042" genau einmal
+----
+
+=== Szenario AC-05-03 — Gesperrtes Mitglied darf vormerken (BR-33)
+
+[source,gherkin]
+----
+  Scenario: Gesperrtes Mitglied darf vormerken
+    Given das Mitglied "M-1099" ist gesperrt wegen einer überfälligen Ausleihe
+    And das Mitglied "M-1099" hat keine Vormerkung für Kategorie "KAT-007"
+    And kein Gegenstand der Kategorie "KAT-007" ist aktuell verfügbar
+    When das Mitglied "M-1099" eine Vormerkung für Kategorie "KAT-007" anlegt
+    Then antwortet das System mit HTTP 201
+    And die Antwort enthält einen "hinweis" der auf die Sperre hinweist
+    And das Mitglied "M-1099" ist in der Warteschlange der Kategorie "KAT-007" eingetragen
+    And die Antwort enthält "reservierung": null
+----
+
+=== Szenario AC-05-04 — Gesperrtes Mitglied: Reservierung wird übersprungen, Platz bleibt (BR-33)
+
+[source,gherkin]
+----
+  Scenario: Reservierung für gesperrtes Mitglied wird übersprungen
+    Given das Mitglied "M-1099" ist gesperrt
+    And die Warteschlange der Kategorie "KAT-007" enthält genau: ["M-1099"]
+    And der Gegenstand "INV-0044" der Kategorie "KAT-007" wird gerade verfügbar
+    When das System die Warteschlange verarbeitet
+    Then wird keine Reservierung für Mitglied "M-1099" angelegt
+    And das Mitglied "M-1099" verbleibt in der Warteschlange an Position 1
+    And der Gegenstand "INV-0044" bleibt im Zustand "verfügbar"
+----
+
+=== Szenario AC-05-05 — Warteschlange: FIFO-Reihenfolge (BR-29)
+
+[source,gherkin]
+----
+  Scenario: Warteschlange wird nach Eingangszeit geordnet
+    Given das Mitglied "M-0001" meldet um 09:00 Uhr eine Vormerkung für "KAT-007" an
+    And das Mitglied "M-0002" meldet um 09:05 Uhr eine Vormerkung für "KAT-007" an
+    And das Mitglied "M-0003" meldet um 09:10 Uhr eine Vormerkung für "KAT-007" an
+    When die Warteschlange der Kategorie "KAT-007" abgefragt wird
+    Then ist die Reihenfolge: ["M-0001", "M-0002", "M-0003"]
+    And das Mitglied "M-0001" hat "position_in_schlange": 1
+----
+
+=== Szenario AC-05-06 — Reservierung verfällt nach 3 Tagen → nächstes Mitglied erhält Reservierung (BR-31)
+
+[source,gherkin]
+----
+  Scenario: Abgelaufene Reservierung gibt den Gegenstand an das nächste Mitglied weiter
+    Given der Gegenstand "INV-0044" ist für Mitglied "M-0001" reserviert
+    And das Verfallsdatum der Reservierung ist "2026-09-01"
+    And in der Warteschlange steht Mitglied "M-0002" an zweiter Stelle
+    When das Systemdatum auf "2026-09-02" vorrückt und die Verfallsprüfung läuft
+    Then verfällt die Reservierung von Mitglied "M-0001"
+    And der Gegenstand "INV-0044" wird für Mitglied "M-0002" reserviert
+    And das neue Verfallsdatum der Reservierung ist "2026-09-05"
+    And das Mitglied "M-0001" ist nicht mehr in der Warteschlange
+
+  Scenario: Abgelaufene Reservierung, keine weitere Vormerkung — Gegenstand wird verfügbar
+    Given der Gegenstand "INV-0044" ist für Mitglied "M-0001" reserviert
+    And das Verfallsdatum der Reservierung ist "2026-09-01"
+    And die Warteschlange der Kategorie "KAT-007" enthält nur Mitglied "M-0001"
+    When das Systemdatum auf "2026-09-02" vorrückt und die Verfallsprüfung läuft
+    Then verfällt die Reservierung von Mitglied "M-0001"
+    And der Gegenstand "INV-0044" wechselt in den Zustand "verfügbar"
+    And die Warteschlange der Kategorie "KAT-007" ist leer
+----
+
+=== Szenario AC-05-07 — Kategorie nicht gefunden
+
+[source,gherkin]
+----
+  Scenario: Vormerkung für nicht existierende Kategorie wird abgelehnt
+    When das Mitglied "M-1042" eine Vormerkung für Kategorie "KAT-999" anlegt
+    Then antwortet das System mit HTTP 404
+    And die Antwort enthält "fehler": "KATEGORIE_NICHT_GEFUNDEN"
+----
+
+=== Szenario AC-05-08 — Sofortige Reservierung wenn Gegenstand verfügbar (BR-30)
+
+[source,gherkin]
+----
+  Scenario: Sofortige Reservierung wenn Gegenstand verfügbar
+    Given der Gegenstand "INV-0044" der Kategorie "KAT-007" hat den Zustand "verfügbar"
+    And das Mitglied "M-1042" ist nicht gesperrt
+    And das Mitglied "M-1042" hat keine Vormerkung für "KAT-007"
+    When das Mitglied "M-1042" eine Vormerkung für Kategorie "KAT-007" anlegt
+    Then antwortet das System mit HTTP 201
+    And die Antwort enthält "reservierung.gegenstand_id": "INV-0044"
+    And die Antwort enthält "reservierung.reserviert_bis" = heute + 3 Kalendertage
+    And der Gegenstand "INV-0044" hat den Zustand "reserviert"
+----
+
+=== Szenario AC-05-09 — Wartungsfälligkeit lässt Warteschlange unverändert (BR-32)
+
+[source,gherkin]
+----
+  Scenario: Wartungsfälliger Gegenstand erzeugt keine Reservierung
+    Given die Warteschlange der Kategorie "KAT-007" enthält Mitglied "M-0001"
+    And der Gegenstand "INV-0044" wechselt nach Prüfung in den Zustand "wartungsfällig"
+    When das System nach einer offenen Vormerkung sucht
+    Then wird keine Reservierung angelegt
+    And die Warteschlange der Kategorie "KAT-007" bleibt unverändert: ["M-0001"]
+----
+
+---
+
+== EARS-Anforderungen
+
+=== REQ-05-01 — Vormerkung anlegen (Ubiquitous)
+
+Das System *muss* einem Mitglied erlauben, eine Vormerkung für eine Kategorie anzulegen, sofern das Mitglied noch keine offene Vormerkung für diese Kategorie besitzt.
+
+_Referenz: BR-27, BR-28_
+
+---
+
+=== REQ-05-02 — Einmaligkeit pro Mitglied und Kategorie (Constraint)
+
+Das System *darf nicht* mehr als eine offene Vormerkung je Mitglied und Kategorie zulassen.
+
+_Referenz: BR-28_
+
+---
+
+=== REQ-05-03 — FIFO-Warteschlange (Ubiquitous)
+
+Das System *muss* Vormerkungen einer Kategorie in einer Warteschlange nach Eingangszeit halten, sodass das zuerst eingegangene Element zuerst bedient wird.
+
+_Referenz: BR-29_
+
+---
+
+=== REQ-05-04 — Automatische Reservierung bei Verfügbarkeit (Event-driven)
+
+*Wenn* ein Gegenstand nach Abschluss eines Prüfprotokolls in den Zustand „verfügbar" wechselt *und* eine offene Vormerkung für die Kategorie des Gegenstands vorliegt, *dann muss* das System den Gegenstand automatisch für das erste nicht-gesperrte Mitglied der Warteschlange reservieren und dessen Vormerkung als bedient markieren.
+
+_Referenz: BR-30, BR-33_
+
+---
+
+=== REQ-05-05 — Reservierungsverfall nach 3 Kalendertagen (Event-driven)
+
+*Wenn* eine Reservierung 3 Kalendertage nach ihrer Entstehung nicht durch eine Ausgabe eingelöst wurde, *dann muss* das System die Reservierung verfallen lassen und den Gegenstand an das nächste Mitglied der Warteschlange weitergeben oder in den Zustand „verfügbar" versetzen, wenn keine weitere Vormerkung vorliegt.
+
+_Referenz: BR-31_
+
+---
+
+=== REQ-05-06 — Wartungsfälligkeit blockiert Reservierung (Event-driven)
+
+*Wenn* ein Gegenstand nach Abschluss eines Prüfprotokolls in den Zustand „wartungsfällig" wechselt, *dann darf* das System *keine* Reservierung erzeugen und *muss* die Warteschlange der Kategorie unverändert lassen.
+
+_Referenz: BR-32_
+
+---
+
+=== REQ-05-07 — Gesperrtes Mitglied: Vormerken erlaubt (Constraint)
+
+Das System *muss* einem gesperrten Mitglied erlauben, eine Vormerkung anzulegen, und *muss* es in der Warteschlange behalten.
+
+_Referenz: BR-33_
+
+---
+
+=== REQ-05-08 — Gesperrtes Mitglied: Reservierung überspringen (Event-driven)
+
+*Wenn* für ein gesperrtes Mitglied eine Reservierung entstehen würde, *dann muss* das System diese Reservierung überspringen, das Mitglied an seiner aktuellen Position in der Warteschlange belassen und das nächste nicht-gesperrte Mitglied der Warteschlange prüfen.
+
+_Referenz: BR-33_
+
+---
+
+=== REQ-05-09 — Stornierung einer Vormerkung (Ubiquitous)
+
+Das System *muss* einem Mitglied erlauben, eine eigene Vormerkung zu stornieren.
+Der Thekendienst *muss* jede Vormerkung stornieren dürfen.
+Eine mit der Vormerkung verbundene aktive Reservierung *muss* beim Stornieren ebenfalls aufgelöst werden.
+
+---
+
+=== REQ-05-10 — Anzeige der eigenen Vormerkungen (Ubiquitous)
+
+Das System *muss* einem Mitglied auf Anfrage alle seine offenen Vormerkungen anzeigen, inklusive der aktuellen Position in der Warteschlange und ggf. bestehender Reservierungsdetails (Gegenstand-ID, Verfallsdatum).
+
+---
+
+=== REQ-05-11 — Warnhinweis bei Sperre (Ubiquitous)
+
+Das System *muss* beim Anlegen einer Vormerkung durch ein gesperrtes Mitglied einen Hinweis zurückgeben, der über die Sperre, das Überspringen einer möglichen Reservierung und den Erhalt des Platzes in der Warteschlange informiert.
+
+_Referenz: BR-33_

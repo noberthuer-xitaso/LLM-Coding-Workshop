@@ -1,0 +1,492 @@
+= UC-06: Wartung abschließen
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+== Persona Use Case (Cockburn Fully Dressed)
+
+=== Übersicht
+
+[cols="1,3"]
+|===
+|Use-Case-ID        |UC-06
+|Name               |Wartung abschließen
+|Primary Actor      |Rolf (Wart)
+|Scope              |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level              |User Goal
+|Stakeholder        |Rolf (Wart): Gegenstand nach Wartung wieder in Betrieb nehmen +
+                     Karim (Thekendienst): Gegenstand wieder ausgeben können +
+                     Sabine (Mitglied): Vorgemerkten Gegenstand erhalten
+|Auslöseereignis    |Rolf hat einen wartungsfälligen Gegenstand geprüft, repariert und/oder gewartet und schließt den Vorgang im System ab.
+|Häufigkeit         |Mehrmals pro Woche, abhängig vom Wartungsintervall der jeweiligen Kategorie.
+|Relevante BRs      |BR-25, BR-26, BR-30
+|===
+
+=== Vorbedingungen
+
+. Der Gegenstand mit der angegebenen Inventarnummer ist im System bekannt.
+. Der Gegenstand befindet sich im Zustand *wartungsfällig*.
+. Der Aufrufer hat die Rolle *Wart* (`X-Role: wart` / `--role wart`).
+
+=== Nachbedingungen (Erfolgsszenario)
+
+. Der Zustand des Gegenstands ist *verfügbar* — oder *reserviert*, wenn eine offene Vormerkung für die Kategorie vorliegt (BR-30).
+. Der Nutzungszähler des Gegenstands ist auf *0* gesetzt (BR-25).
+. Falls eine Reservierung entstanden ist: Das erste Mitglied der Warteschlange hat eine Reservierung für drei Kalendertage erhalten (BR-30, BR-31).
+. Der Zustandswechsel ist im Audit-Log festgehalten.
+
+=== Hauptszenario
+
+[cols="^1,4,4"]
+|===
+|Schritt |Wart (Rolf)                                              |System
+
+|1       |Rolf schließt die körperliche Wartung am Gegenstand ab und ruft "Wartung abschließen" mit der Inventarnummer auf.
+         |—
+
+|2       |—
+         |System empfängt die Anfrage und prüft, ob der Gegenstand existiert.
+
+|3       |—
+         |System prüft, ob der Gegenstand im Zustand *wartungsfällig* ist.
+
+|4       |—
+         |System setzt den Nutzungszähler auf 0 (BR-25).
+
+|5       |—
+         |System prüft, ob für die Kategorie des Gegenstands eine offene Vormerkung vorliegt (BR-30).
+
+|6a      |—
+         |*Keine Vormerkung:* System setzt den Gegenstandszustand auf *verfügbar*.
+
+|6b      |—
+         |*Vormerkung vorhanden:* System setzt den Gegenstandszustand auf *reserviert* und weist ihn dem ersten Mitglied der Warteschlange zu; Reservierungsfrist: heute + 3 Kalendertage (BR-30, BR-31).
+
+|7       |—
+         |System schreibt einen Audit-Eintrag mit Zeitstempel, Inventarnummer, neuem Zustand und — im Fall der Reservierung — Mitglieds-ID.
+
+|8       |Rolf erhält die Bestätigung mit dem neuen Zustand des Gegenstands.
+         |System antwortet mit HTTP 200 und der aktuellen Gegenstandsrepräsentation.
+|===
+
+=== Erweiterungen
+
+==== 3a — Gegenstand nicht im Zustand `wartungsfällig`
+
+[cols="^1,4,4"]
+|===
+|Schritt |Wart                                    |System
+
+|3a.1    |—
+         |System stellt fest, dass der aktuelle Zustand nicht `wartungsfällig` ist (z. B. `verfügbar`, `ausgeliehen`, `in Prüfung`, `reserviert`, `ausgemustert`).
+
+|3a.2    |—
+         |System bricht den Vorgang ab und antwortet mit HTTP 409 und einem fachlichen Fehlercode `GEGENSTAND_NICHT_WARTUNGSFAELLIG`.
+
+|3a.3    |Rolf erhält die Fehlermeldung. Kein Zustand wird verändert.
+         |—
+|===
+
+==== 2a — Gegenstand nicht gefunden
+
+[cols="^1,4,4"]
+|===
+|Schritt |Wart                                    |System
+
+|2a.1    |—
+         |System findet keinen Gegenstand mit der angegebenen Inventarnummer.
+
+|2a.2    |—
+         |System antwortet mit HTTP 404 und Fehlercode `GEGENSTAND_NICHT_GEFUNDEN`.
+
+|2a.3    |Rolf erhält die Fehlermeldung. Kein Zustand wird verändert.
+         |—
+|===
+
+==== 6b-i — Gesperrtes Mitglied an erster Position der Warteschlange (BR-33)
+
+[cols="^1,4,4"]
+|===
+|Schritt |Wart |System
+
+|6b-i.1  |—
+          |System stellt fest, dass das erste Mitglied der Warteschlange gesperrt ist.
+
+|6b-i.2  |—
+          |System überspringt dieses Mitglied (behält dessen Platz in der Schlange) und prüft das nächste Mitglied. Dieser Vorgang wiederholt sich, bis ein nicht gesperrtes Mitglied gefunden oder die Schlange erschöpft ist.
+
+|6b-i.3a |—
+          |*Nicht gesperrtes Mitglied gefunden:* Reservierung wird für dieses Mitglied angelegt → weiter mit Hauptszenario Schritt 7.
+
+|6b-i.3b |—
+          |*Alle Mitglieder der Schlange gesperrt oder Schlange leer:* Gegenstand wird *verfügbar* gesetzt → weiter mit Hauptszenario Schritt 7.
+|===
+
+---
+
+== System Use Cases
+
+=== REST-API
+
+==== POST /gegenstaende/{inventarnummer}/wartung-abschliessen
+
+[cols="1,3"]
+|===
+|Method             |`POST`
+|Path               |`/gegenstaende/{inventarnummer}/wartung-abschliessen`
+|Authentifizierung  |Header `X-Role: wart` (erforderlich)
+|===
+
+===== Eingabe
+
+[cols="1,1,1,3"]
+|===
+|Parameter      |Quelle |Pflicht |Beschreibung
+
+|`inventarnummer`
+|Path-Variable
+|ja
+|Eindeutige Inventarnummer des Gegenstands (z. B. `WZ-0042`).
+
+|`X-Role`
+|HTTP-Header
+|ja
+|Muss den Wert `wart` haben. Nicht vorhandener oder abweichender Wert führt zu HTTP 403.
+|===
+
+Kein Request-Body erforderlich.
+
+===== Verarbeitung
+
+. Gegenstand anhand der Inventarnummer laden. Nicht gefunden → HTTP 404.
+. Zustand prüfen: muss `wartungsfällig` sein. Anderer Zustand → HTTP 409.
+. Nutzungszähler auf 0 setzen (BR-25).
+. Offene Vormerkungen für die Kategorie prüfen (BR-30):
+** Keine Vormerkung → Zustand auf `verfügbar` setzen.
+** Vormerkung vorhanden → Zustand auf `reserviert` setzen, Reservierung anlegen (BR-31, BR-33 beachten).
+. Audit-Eintrag schreiben.
+. Aktuelle Gegenstandsrepräsentation zurückgeben.
+
+===== Ausgabe — HTTP 200
+
+[source,json]
+----
+{
+  "inventarnummer": "WZ-0042",
+  "bezeichnung": "Bohrhammer Makita HR2630",
+  "kategorie": "bohrhammer",
+  "zustand": "verfügbar",
+  "nutzungszaehler": 0,
+  "reserviertFuer": null
+}
+----
+
+Bei Reservierung:
+
+[source,json]
+----
+{
+  "inventarnummer": "WZ-0042",
+  "bezeichnung": "Bohrhammer Makita HR2630",
+  "kategorie": "bohrhammer",
+  "zustand": "reserviert",
+  "nutzungszaehler": 0,
+  "reserviertFuer": {
+    "mitgliedId": "M-0117",
+    "reserviertBis": "2026-08-27"
+  }
+}
+----
+
+===== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode                        |Beschreibung
+
+|400
+|`INVENTARNUMMER_LEER`
+|Inventarnummer ist leer oder fehlt.
+
+|403
+|`ROLLE_UNGUELTIG`
+|Header `X-Role` fehlt oder ist nicht `wart`.
+
+|404
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer im System.
+
+|409
+|`GEGENSTAND_NICHT_WARTUNGSFAELLIG`
+|Gegenstand ist nicht im Zustand `wartungsfällig`. Aktueller Zustand wird im Response-Body mitgeliefert.
+|===
+
+Fehlerantwort-Format:
+
+[source,json]
+----
+{
+  "fehlercode": "GEGENSTAND_NICHT_WARTUNGSFAELLIG",
+  "nachricht": "Gegenstand WZ-0042 ist nicht wartungsfällig (aktueller Zustand: verfügbar).",
+  "inventarnummer": "WZ-0042",
+  "zustand": "verfügbar"
+}
+----
+
+---
+
+=== CLI
+
+==== leihgut wartung abschliessen
+
+[source,shell]
+----
+leihgut wartung abschliessen --inventarnummer <nr> [--role wart]
+----
+
+[cols="1,1,1,3"]
+|===
+|Flag               |Kurzform |Pflicht |Beschreibung
+
+|`--inventarnummer` |`-i`     |ja      |Inventarnummer des zu wartenden Gegenstands.
+|`--role`           |         |nein    |Rolle des Aufrufers; Standard: `wart`. Für Testszenarien explizit überschreibbar.
+|===
+
+===== Ausgabe — Erfolg (kein Vormerker)
+
+[source]
+----
+✓ Wartung abgeschlossen.
+  Gegenstand : WZ-0042 — Bohrhammer Makita HR2630
+  Zustand    : verfügbar
+  Zähler     : 0
+----
+
+===== Ausgabe — Erfolg (mit Reservierung)
+
+[source]
+----
+✓ Wartung abgeschlossen.
+  Gegenstand      : WZ-0042 — Bohrhammer Makita HR2630
+  Zustand         : reserviert
+  Zähler          : 0
+  Reserviert für  : Mitglied M-0117 (bis 2026-08-27)
+----
+
+===== Fehlerausgabe
+
+[source]
+----
+✗ Fehler: Gegenstand WZ-0042 ist nicht wartungsfällig (aktueller Zustand: verfügbar).
+  Fehlercode: GEGENSTAND_NICHT_WARTUNGSFAELLIG
+  Exit-Code: 1
+----
+
+Exit-Codes: `0` = Erfolg, `1` = fachlicher Fehler, `2` = Systemfehler.
+
+---
+
+== Aktivitätsdiagramm (PlantUML)
+
+[plantuml, uc-06-aktivitaet, svg]
+....
+@startuml
+|Wart (Rolf)|
+start
+:Wartung am Gegenstand\nabschließen;
+:Aktion aufrufen:\n"Wartung abschließen"\n(Inventarnummer);
+
+|System|
+:Gegenstand laden;
+
+if (Gegenstand gefunden?) then (nein)
+  :HTTP 404\nGEGENSTAND_NICHT_GEFUNDEN;
+  stop
+else (ja)
+endif
+
+if (Zustand == wartungsfällig?) then (nein)
+  :HTTP 409\nGEGENSTAND_NICHT_WARTUNGSFAELLIG;
+  stop
+else (ja)
+endif
+
+:Nutzungszähler = 0\n(BR-25);
+
+:Offene Vormerkung\nfür Kategorie prüfen\n(BR-30);
+
+if (Offene Vormerkung\nvorhanden?) then (ja)
+  :Erstes nicht-gesperrtes\nMitglied der Warteschlange\nermitteln (BR-33);
+  if (Nicht-gesperrtes\nMitglied gefunden?) then (ja)
+    :Zustand = reserviert\nReservierung anlegen\n(gültig 3 Tage)\n(BR-30, BR-31);
+  else (nein)
+    :Zustand = verfügbar;
+  endif
+else (nein)
+  :Zustand = verfügbar;
+endif
+
+:Audit-Eintrag\nschreiben;
+:HTTP 200\n+ Gegenstandsdaten;
+
+|Wart (Rolf)|
+:Bestätigung\nentgegennehmen;
+stop
+@enduml
+....
+
+---
+
+== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-06 Wartung abschließen
+
+  Grundlage:
+    Angenommen die Kategorie "bohrhammer" hat ein Wartungsintervall von 10 Ausleihen
+    Und der Gegenstand "WZ-0042" gehört zur Kategorie "bohrhammer"
+
+  Szenario: Erfolgreicher Wartungsabschluss ohne offene Vormerkung
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Und der Nutzungszähler von "WZ-0042" ist 10
+    Und es gibt keine offene Vormerkung für die Kategorie "bohrhammer"
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann ist der Zustand von "WZ-0042" gleich "verfügbar"
+    Und der Nutzungszähler von "WZ-0042" ist 0
+    Und es wurde kein Reservierungseintrag für "WZ-0042" angelegt
+
+  Szenario: Wartungsabschluss mit offener Vormerkung – Gegenstand wird reserviert
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Und der Nutzungszähler von "WZ-0042" ist 10
+    Und Mitglied "M-0117" hat eine offene Vormerkung für die Kategorie "bohrhammer"
+    Und Mitglied "M-0117" ist nicht gesperrt
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann ist der Zustand von "WZ-0042" gleich "reserviert"
+    Und der Nutzungszähler von "WZ-0042" ist 0
+    Und die Reservierung für "WZ-0042" gilt für Mitglied "M-0117"
+    Und die Reservierung läuft in 3 Kalendertagen ab
+
+  Szenario: Wartungsabschluss mit ausschließlich gesperrten Vormerker-Mitgliedern
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Und Mitglied "M-0100" hat eine offene Vormerkung für die Kategorie "bohrhammer"
+    Und Mitglied "M-0100" ist gesperrt
+    Und es gibt keine weiteren Vormerkungen für die Kategorie "bohrhammer"
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann ist der Zustand von "WZ-0042" gleich "verfügbar"
+    Und der Nutzungszähler von "WZ-0042" ist 0
+    Und Mitglied "M-0100" behält seinen Platz in der Warteschlange für "bohrhammer"
+
+  Szenario: Fehler – Gegenstand ist nicht wartungsfällig
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "verfügbar"
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode ist "GEGENSTAND_NICHT_WARTUNGSFAELLIG"
+    Und der Zustand von "WZ-0042" ist weiterhin "verfügbar"
+    Und der Nutzungszähler von "WZ-0042" ist unverändert
+
+  Szenario: Fehler – Gegenstand nicht gefunden
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-UNBEKANNT" aufruft
+    Dann antwortet das System mit HTTP 404
+    Und der Fehlercode ist "GEGENSTAND_NICHT_GEFUNDEN"
+
+  Szenario: Nutzungszähler wird auf 0 gesetzt – unabhängig vom Ausgangswert
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Und der Nutzungszähler von "WZ-0042" ist 10
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann ist der Nutzungszähler von "WZ-0042" genau 0
+
+  Szenario: Kein Prüfprotokoll und keine Ausleihe-ID erforderlich
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Wenn der Wart die Aktion "Wartung abschließen" für "WZ-0042" aufruft ohne Ausleihe-ID
+    Dann ist die Anfrage erfolgreich
+    Und es wurde kein Prüfprotokoll erzeugt
+
+  Szenario: Zugriff ohne Wart-Rolle wird abgewiesen
+    Angenommen der Gegenstand "WZ-0042" hat den Zustand "wartungsfällig"
+    Wenn ein Aufrufer mit Rolle "theke" die Aktion "Wartung abschließen" für "WZ-0042" aufruft
+    Dann antwortet das System mit HTTP 403
+    Und der Zustand von "WZ-0042" ist weiterhin "wartungsfällig"
+----
+
+---
+
+== EARS-Anforderungen
+
+=== Funktionale Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID         |EARS-Typ     |Anforderung
+
+|EARS-06-01
+|Ubiquitous
+|Das System *muss* für jeden Gegenstand einen Nutzungszähler führen, der die Anzahl der abgeschlossenen Ausleihen seit der letzten Wartung repräsentiert.
+
+|EARS-06-02
+|Event-driven
+|Wenn der Wart die Aktion "Wartung abschließen" für einen Gegenstand aufruft, *muss* das System den Nutzungszähler des Gegenstands auf 0 setzen. (BR-25)
+
+|EARS-06-03
+|Event-driven
+|Wenn der Wart die Aktion "Wartung abschließen" für einen Gegenstand aufruft und keine offene Vormerkung für die Kategorie des Gegenstands vorliegt, *muss* das System den Zustand des Gegenstands auf `verfügbar` setzen. (BR-25)
+
+|EARS-06-04
+|Event-driven
+|Wenn der Wart die Aktion "Wartung abschließen" für einen Gegenstand aufruft und mindestens eine offene Vormerkung für die Kategorie des Gegenstands vorliegt, *muss* das System den Zustand des Gegenstands auf `reserviert` setzen und eine Reservierung für das erste nicht-gesperrte Mitglied der Warteschlange anlegen. (BR-25, BR-30)
+
+|EARS-06-05
+|Unwanted behavior
+|Wenn der Wart die Aktion "Wartung abschließen" für einen Gegenstand aufruft, der sich nicht im Zustand `wartungsfällig` befindet, *muss* das System die Anfrage mit dem Fehlercode `GEGENSTAND_NICHT_WARTUNGSFAELLIG` ablehnen und keinen Zustand verändern. (BR-26)
+
+|EARS-06-06
+|Unwanted behavior
+|Wenn der Wart die Aktion "Wartung abschließen" für eine unbekannte Inventarnummer aufruft, *muss* das System die Anfrage mit dem Fehlercode `GEGENSTAND_NICHT_GEFUNDEN` ablehnen.
+
+|EARS-06-07
+|Unwanted behavior
+|Wenn ein Aufrufer ohne die Rolle `wart` die Aktion "Wartung abschließen" aufruft, *muss* das System die Anfrage ablehnen (HTTP 403) und keinen Zustand verändern.
+
+|EARS-06-08
+|Ubiquitous
+|Die Aktion "Wartung abschließen" *darf kein* Prüfprotokoll erzeugen und *darf nicht* eine Ausleihe-ID erfordern oder referenzieren. (BR-25)
+
+|EARS-06-09
+|Event-driven
+|Wenn durch die Aktion "Wartung abschließen" eine Reservierung angelegt wird, *muss* das System die Reservierungsfrist auf drei Kalendertage ab dem aktuellen Datum setzen. (BR-31)
+
+|EARS-06-10
+|Feature-driven
+|Wenn durch die Aktion "Wartung abschließen" eine Reservierung für ein gesperrtes Mitglied entstehen würde, *muss* das System dieses Mitglied überspringen, dessen Position in der Warteschlange beibehalten und das nächste nicht-gesperrte Mitglied der Warteschlange berücksichtigen. (BR-33)
+
+|EARS-06-11
+|Event-driven
+|Wenn der Wart die Aktion "Wartung abschließen" erfolgreich abschließt, *muss* das System einen Audit-Eintrag mit Zeitstempel, Inventarnummer, neuem Zustand und — bei Reservierung — der Mitglieds-ID erzeugen.
+
+|EARS-06-12
+|Ubiquitous
+|Das System *muss* sicherstellen, dass kein wartungsfälliger Gegenstand ausgegeben oder reserviert werden kann. (BR-26)
+|===
+
+=== Nichtfunktionale Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID         |Kategorie    |Anforderung
+
+|EARS-06-N1
+|Performance
+|Die Aktion "Wartung abschließen" *muss* unter normaler Last (bis 400 Gegenstände, 800 Mitglieder) innerhalb von 300 ms antworten, gemessen am 95. Perzentil.
+
+|EARS-06-N2
+|Korrektheit
+|Der Nutzungszähler *muss* nach jeder erfolgreichen Wartung exakt den Wert 0 haben, unabhängig vom Zählerwert vor der Wartung.
+
+|EARS-06-N3
+|Nachvollziehbarkeit
+|Jede erfolgreiche Ausführung von "Wartung abschließen" *muss* einen unveränderlichen Audit-Eintrag hinterlassen, der Zeitstempel, ausführende Wart-ID und Inventarnummer enthält.
+|===

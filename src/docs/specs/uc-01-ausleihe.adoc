@@ -1,0 +1,603 @@
+= UC-01: Gegenstand ausleihen
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+== Persona Use Case (Cockburn Fully Dressed)
+
+=== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID          |UC-01
+|Name           |Gegenstand ausleihen
+|Scope          |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level          |User Goal
+|Primary Actor  |Karim (Thekendienst)
+|Unterstützte Personas |Sabine (Mitglied) — nimmt den Gegenstand entgegen
+|===
+
+=== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interessen
+
+|Karim (Thekendienst)
+|In ≤ 30 Sekunden wissen, ob die Ausgabe zulässig ist. Kaution nicht im Kopf ausrechnen müssen. Klare Fehlermeldung, wenn etwas schiefgeht.
+
+|Sabine (Mitglied)
+|Gegenstand mitnehmen können, sofern sie alle Voraussetzungen erfüllt. Transparenz über die hinterlegte Kaution.
+
+|Rolf (Wart)
+|Keine wartungsfälligen Gegenstände werden ausgegeben. Jeder Kautionsbetrag ist nachvollziehbar hinterlegt.
+
+|Verein
+|Vollständige Nachvollziehbarkeit jeder Kautionsbewegung (BR-22). Keine Ausgabe trotz Sperre, fehlendem Nachweis oder Wartungsfälligkeit.
+|===
+
+=== Vorbedingungen
+
+. Der Thekendienst ist im System mit der Rolle `thekendienst` identifiziert (Header `X-Role: thekendienst`).
+. Die Inventarnummer des Gegenstands ist bekannt.
+. Die Mitgliedsnummer des Mitglieds ist bekannt.
+. Das aktuelle Datum ist über die austauschbare Datumsquelle abrufbar.
+
+=== Nachbedingungen (Erfolgsgarantie)
+
+Bei erfolgreicher Ausgabe:
+
+. Eine Ausleihe ist im System angelegt mit Status `aktiv`, Ausgabedatum und Rückgabefrist (BR-09).
+. Die Kaution ist als Hinterlegung gebucht (BR-20).
+. Für die Kautionshinterlegung existiert ein Audit-Eintrag mit Zeitstempel, Betrag und Auslöser (BR-22).
+. Der Gegenstand befindet sich im Zustand `ausgeliehen`.
+. Der Nutzungszähler des Gegenstands ist noch nicht erhöht (Erhöhung erfolgt erst beim Abschluss der Prüfung, BR-23).
+
+=== Hauptszenario
+
+Akteur: Karim (Thekendienst). Mitglied: Sabine.
+
+. Karim scannt oder gibt die Inventarnummer des Gegenstands ein.
+. Karim gibt die Mitgliedsnummer von Sabine ein.
+. *[BR-07]* Das System prüft, ob Sabine gesperrt ist. → Sabine ist nicht gesperrt.
+. *[BR-06]* Das System prüft die Anzahl aktiver Ausleihen von Sabine. → Sabine hat weniger als 3 aktive Ausleihen.
+. *[BR-05]* Das System prüft den Zustand des Gegenstands. → Gegenstand ist `verfügbar`.
+. *[BR-26]* Das System prüft, ob der Gegenstand wartungsfällig ist. → Nicht wartungsfällig.
+. *[BR-08]* Das System prüft, ob für die Kategorie eine Einweisungspflicht besteht. → Keine Einweisungspflicht oder Einweisung für Sabine liegt vor.
+. *[BR-04]* Das System berechnet die Kaution: 20 % des Wiederbeschaffungswerts, kaufmännisch gerundet, min. 5 €, max. 100 €.
+. *[BR-09]* Das System legt die Ausleihe an, setzt die Rückgabefrist auf Ausgabedatum + Leihdauer der Kategorie.
+. *[BR-20, BR-22]* Das System hinterlegt die Kaution und erzeugt einen Audit-Eintrag (Zeitstempel, Betrag, Ausleihe-ID als Auslöser).
+. Das System versetzt den Gegenstand in den Zustand `ausgeliehen`.
+. Das System gibt Karim die Ausleihedetails zurück: Ausleihe-ID, Rückgabefrist, Kautionsbetrag.
+. Karim händigt den Gegenstand an Sabine aus und nennt ihr die Rückgabefrist sowie den Kautionsbetrag.
+
+=== Erweiterungen
+
+==== 3a — Mitglied ist gesperrt (BR-07)
+
+. Das System erkennt, dass Sabine mindestens eine überfällige Ausleihe hat.
+. Das System verweigert die Ausgabe mit Fehlercode `MITGLIED_GESPERRT`.
+. Karim informiert Sabine, dass die Ausgabe nicht möglich ist.
+. Use Case endet ohne Ausleihe.
+
+==== 4a — Ausleihlimit erreicht (BR-06)
+
+. Das System stellt fest, dass Sabine bereits 3 aktive Ausleihen führt.
+. Das System verweigert die Ausgabe mit Fehlercode `AUSLEIHLIMIT_ERREICHT`.
+. Karim informiert Sabine.
+. Use Case endet ohne Ausleihe.
+
+==== 5a — Gegenstand nicht verfügbar und nicht für Sabine reserviert (BR-05)
+
+. Der Gegenstand befindet sich im Zustand `ausgeliehen`, `in_Prüfung` oder `ausgemustert`.
+. Das System verweigert die Ausgabe mit Fehlercode `GEGENSTAND_NICHT_VERFUEGBAR`.
+. Karim informiert Sabine.
+. Use Case endet ohne Ausleihe.
+
+==== 5b — Gegenstand ist für ein anderes Mitglied reserviert (BR-05)
+
+. Der Gegenstand befindet sich im Zustand `reserviert`, jedoch für ein anderes Mitglied.
+. Das System verweigert die Ausgabe mit Fehlercode `GEGENSTAND_NICHT_VERFUEGBAR`.
+. Karim informiert Sabine.
+. Use Case endet ohne Ausleihe.
+
+==== 5c — Gegenstand ist für Sabine reserviert (BR-05)
+
+. Der Gegenstand befindet sich im Zustand `reserviert` für Sabine.
+. Das System akzeptiert den Zustand als ausgabefähig.
+. Weiter mit Schritt 6.
+
+==== 6a — Gegenstand wartungsfällig (BR-26)
+
+. Das System stellt fest, dass der Gegenstand wartungsfällig ist.
+. Das System verweigert die Ausgabe mit Fehlercode `GEGENSTAND_WARTUNGSFAELLIG`.
+. Karim informiert Sabine und bittet Rolf um Wartungsabschluss.
+. Use Case endet ohne Ausleihe.
+
+==== 7a — Einweisungspflicht nicht erfüllt (BR-08)
+
+. Die Kategorie erfordert eine Einweisung, aber für Sabine liegt keine dokumentierte Einweisung für diese Kategorie vor.
+. Das System verweigert die Ausgabe mit Fehlercode `EINWEISUNG_FEHLT`.
+. Karim informiert Sabine.
+. Use Case endet ohne Ausleihe.
+
+==== 1a — Gegenstand nicht gefunden
+
+. Die eingegebene Inventarnummer ist im System unbekannt.
+. Das System gibt Fehlercode `GEGENSTAND_NICHT_GEFUNDEN` zurück.
+. Use Case endet ohne Ausleihe.
+
+==== 2a — Mitglied nicht gefunden
+
+. Die eingegebene Mitgliedsnummer ist im System unbekannt.
+. Das System gibt Fehlercode `MITGLIED_NICHT_GEFUNDEN` zurück.
+. Use Case endet ohne Ausleihe.
+
+---
+
+== System Use Cases
+
+=== POST /ausleihen
+
+Dieser Endpunkt löst die Ausgabe eines Gegenstands an ein Mitglied aus.
+Nur die Rolle `thekendienst` darf ihn aufrufen.
+
+==== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`gegenstandId`
+|string
+|ja
+|Inventarnummer des auszugebenden Gegenstands
+
+|`mitgliedId`
+|string
+|ja
+|Mitgliedsnummer des ausleihenden Mitglieds
+
+|`ausgabedatum`
+|string (ISO 8601: `YYYY-MM-DD`)
+|nein
+|Ausgabedatum; fehlt es, verwendet das System die austauschbare Datumsquelle (BR-09)
+|===
+
+HTTP-Header:
+
+[source]
+----
+X-Role: thekendienst
+Content-Type: application/json
+----
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "gegenstandId": "INV-00042",
+  "mitgliedId":   "M-0815"
+}
+----
+
+==== Validierung
+
+[cols="1,2,2"]
+|===
+|Feld |Regel |Fehlercode
+
+|`gegenstandId`
+|Nicht leer; Gegenstand muss im System existieren
+|`GEGENSTAND_NICHT_GEFUNDEN`
+
+|`mitgliedId`
+|Nicht leer; Mitglied muss im System existieren
+|`MITGLIED_NICHT_GEFUNDEN`
+
+|`ausgabedatum`
+|ISO-8601-Datum, falls angegeben; darf nicht in der Zukunft liegen
+|`UNGÜLTIGES_DATUM`
+
+|`X-Role`
+|Muss `thekendienst` sein
+|`ROLLE_UNZULAESSIG` (HTTP 403)
+|===
+
+==== Verarbeitung
+
+. Eingabevalidierung: `gegenstandId`, `mitgliedId`, optionales `ausgabedatum`.
+. Mitglied laden; falls nicht gefunden → `MITGLIED_NICHT_GEFUNDEN` (422).
+. *[BR-07]* Sperre prüfen: Hat das Mitglied mindestens eine überfällige Ausleihe? → `MITGLIED_GESPERRT` (422).
+. *[BR-06]* Ausleihlimit prüfen: Anzahl aktiver Ausleihen des Mitglieds ≥ 3? → `AUSLEIHLIMIT_ERREICHT` (422).
+. Gegenstand laden; falls nicht gefunden → `GEGENSTAND_NICHT_GEFUNDEN` (422).
+. *[BR-26]* Wartungsfälligkeit prüfen: Zustand `wartungsfällig`? → `GEGENSTAND_WARTUNGSFAELLIG` (422).
+. *[BR-05]* Verfügbarkeit prüfen: Zustand `verfügbar` ODER (`reserviert` UND Reservierung gehört zu diesem Mitglied)? Sonst → `GEGENSTAND_NICHT_VERFUEGBAR` (422).
+. *[BR-08]* Einweisungspflicht prüfen: Ist die Kategorie einweisungspflichtig und fehlt eine dokumentierte Einweisung für dieses Mitglied in dieser Kategorie? → `EINWEISUNG_FEHLT` (422).
+. *[BR-04]* Kaution berechnen: `round(wiederbeschaffungswert * 0.20)`, Minimum 5 €, Maximum 100 €.
+. *[BR-09]* Rückgabefrist berechnen: Ausgabedatum + Leihdauer der Kategorie in Tagen.
+. Ausleihe anlegen: Ausleihe-ID generieren, Status `aktiv`, Ausgabedatum, Rückgabefrist, Gegenstand-ID, Mitglied-ID, Kautionsbetrag persistieren.
+. *[BR-20]* Kaution hinterlegen: Kautionsbewegung vom Typ `HINTERLEGUNG` mit Betrag, Ausleihe-ID als Auslöser und aktuellem Zeitstempel anlegen.
+. *[BR-22]* Audit-Eintrag erzeugen: Zeitstempel, Betrag, Auslöser (`ausleiheId`).
+. Gegenstandzustand auf `ausgeliehen` setzen; ggf. vorhandene Reservierung des Mitglieds auflösen.
+. Response mit HTTP 201 und Ausleihedetails zurückgeben.
+
+==== Ausgabe
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Feld |Beschreibung
+
+.9+|`201 Created`
+|`ausleiheId`
+|Eindeutige ID der angelegten Ausleihe
+
+|`gegenstandId`
+|Inventarnummer des ausgeliehenen Gegenstands
+
+|`mitgliedId`
+|Mitgliedsnummer
+
+|`ausgabedatum`
+|Tatsächliches Ausgabedatum (ISO 8601)
+
+|`rueckgabefrist`
+|Berechnete Rückgabefrist (ISO 8601)
+
+|`kautionsbetrag`
+|Hinterlegter Kautionsbetrag in ganzen Euro
+
+|`kautionsAuditId`
+|ID des erzeugten Audit-Eintrags (BR-22)
+
+|`gegenstandZustand`
+|`ausgeliehen`
+
+|`leihdauerTage`
+|Leihdauer der Kategorie in Tagen
+|===
+
+Beispiel-Response-Body:
+
+[source,json]
+----
+{
+  "ausleiheId":       "AL-20260824-00099",
+  "gegenstandId":     "INV-00042",
+  "mitgliedId":       "M-0815",
+  "ausgabedatum":     "2026-08-24",
+  "rueckgabefrist":   "2026-09-07",
+  "kautionsbetrag":   40,
+  "kautionsAuditId":  "AUD-20260824-00301",
+  "gegenstandZustand": "ausgeliehen",
+  "leihdauerTage":    14
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`UNGÜLTIGES_DATUM`
+|`ausgabedatum` ist kein gültiges ISO-8601-Datum oder liegt in der Zukunft
+
+|`400 Bad Request`
+|`EINGABE_UNVOLLSTAENDIG`
+|`gegenstandId` oder `mitgliedId` fehlt oder ist leer
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `thekendienst`
+
+|`404 Not Found`
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit der angegebenen Inventarnummer
+
+|`404 Not Found`
+|`MITGLIED_NICHT_GEFUNDEN`
+|Kein Mitglied mit der angegebenen Mitgliedsnummer
+
+|`422 Unprocessable Entity`
+|`MITGLIED_GESPERRT`
+|Mitglied hat mindestens eine überfällige Ausleihe (BR-07, BR-34, BR-35)
+
+|`422 Unprocessable Entity`
+|`AUSLEIHLIMIT_ERREICHT`
+|Mitglied führt bereits 3 aktive Ausleihen (BR-06)
+
+|`422 Unprocessable Entity`
+|`GEGENSTAND_NICHT_VERFUEGBAR`
+|Gegenstand ist weder `verfügbar` noch für dieses Mitglied `reserviert` (BR-05)
+
+|`422 Unprocessable Entity`
+|`GEGENSTAND_WARTUNGSFAELLIG`
+|Gegenstand ist wartungsfällig (BR-26)
+
+|`422 Unprocessable Entity`
+|`EINWEISUNG_FEHLT`
+|Kategorie ist einweisungspflichtig; Mitglied hat keine dokumentierte Einweisung (BR-08)
+|===
+
+Fehler-Response-Body (einheitliches Format):
+
+[source,json]
+----
+{
+  "fehlercode": "MITGLIED_GESPERRT",
+  "meldung":    "Das Mitglied M-0815 ist gesperrt und darf nicht ausleihen.",
+  "kontext": {
+    "mitgliedId": "M-0815"
+  }
+}
+----
+
+---
+
+== Aktivitätsdiagramm (PlantUML)
+
+[plantuml, uc01-aktivitaet, svg]
+----
+@startuml UC-01 Gegenstand ausleihen
+skinparam defaultFontName monospaced
+skinparam swimlaneWidth 280
+
+|Thekendienst (Karim)|
+start
+:Inventarnummer und\nMitgliedsnummer eingeben;
+:POST /ausleihen senden;
+
+|System|
+:Eingabe validieren;
+if (gegenstandId / mitgliedId\ngültig?) then (nein)
+  :HTTP 404\nGEGENSTAND_NICHT_GEFUNDEN\noder MITGLIED_NICHT_GEFUNDEN;
+  stop
+endif
+
+:Mitglied laden;
+if (Mitglied gesperrt?\n[BR-07, BR-34, BR-35]) then (ja)
+  :HTTP 422\nMITGLIED_GESPERRT;
+  stop
+endif
+
+if (Aktive Ausleihen ≥ 3?\n[BR-06]) then (ja)
+  :HTTP 422\nAUSLEIHLIMIT_ERREICHT;
+  stop
+endif
+
+:Gegenstand laden;
+if (Gegenstand\nwartungsfällig?\n[BR-26]) then (ja)
+  :HTTP 422\nGEGENSTAND_WARTUNGSFAELLIG;
+  stop
+endif
+
+if (Zustand verfügbar\nODER reserviert\nfür dieses Mitglied?\n[BR-05]) then (nein)
+  :HTTP 422\nGEGENSTAND_NICHT_VERFUEGBAR;
+  stop
+endif
+
+if (Einweisungspflicht\nnicht erfüllt?\n[BR-08]) then (ja)
+  :HTTP 422\nEINWEISUNG_FEHLT;
+  stop
+endif
+
+:Kaution berechnen\n[BR-04]\n20% WBW, min 5€, max 100€;
+:Rückgabefrist berechnen\n[BR-09]\nAusgabedatum + Leihdauer;
+:Ausleihe anlegen\n[BR-09];
+:Kaution hinterlegen\n[BR-20];
+:Audit-Eintrag erzeugen\n[BR-22]\nZeitstempel, Betrag, Auslöser;
+:Gegenstandzustand\nauf "ausgeliehen" setzen\n(Reservierung ggf. auflösen);
+:HTTP 201\nAusleihedetails zurückgeben;
+
+|Thekendienst (Karim)|
+:Ausleihedetails prüfen\n(Rückgabefrist, Kaution);
+:Gegenstand an Mitglied\naushändigen;
+stop
+
+@enduml
+----
+
+---
+
+== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-01 Gegenstand ausleihen
+
+  Grundlage:
+    Gegeben sei ein Gegenstand "INV-00042" der Kategorie "Bohrhammer"
+      Und der Wiederbeschaffungswert des Gegenstands beträgt 200 Euro
+      Und die Leihdauer der Kategorie "Bohrhammer" beträgt 14 Tage
+      Und das Wartungsintervall der Kategorie "Bohrhammer" beträgt 20 Ausleihen
+      Und die Kategorie "Bohrhammer" ist nicht einweisungspflichtig
+      Und das aktuelle Datum ist "2026-08-24"
+
+  # ── Erfolgsfälle ─────────────────────────────────────────────────────────────
+
+  Szenario: Erfolgreiche Ausleihe eines verfügbaren Gegenstands
+    Gegeben sei der Gegenstand "INV-00042" ist verfügbar
+      Und das Mitglied "M-0815" ist nicht gesperrt
+      Und das Mitglied "M-0815" hat 0 aktive Ausleihen
+      Und das Mitglied "M-0815" hat keine Einweisungspflicht zu erfüllen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "ausleiheId"
+      Und die Antwort enthält "ausgabedatum" "2026-08-24"
+      Und die Antwort enthält "rueckgabefrist" "2026-09-07"
+      Und die Antwort enthält "kautionsbetrag" 40
+      Und der Gegenstand "INV-00042" hat den Zustand "ausgeliehen"
+      Und ein Audit-Eintrag für die Kautionshinterlegung von 40 Euro existiert
+
+  # BR-04 Kautionsberechnung ──────────────────────────────────────────────────
+
+  Szenario: Kautionshinterlegung und Audit-Eintrag werden korrekt angelegt (BR-04, BR-20, BR-22)
+    Gegeben sei der Gegenstand "INV-00042" ist verfügbar
+      Und der Wiederbeschaffungswert beträgt 200 Euro
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "kautionsbetrag" 40
+      Und ein Audit-Eintrag existiert mit Betrag 40, Typ "HINTERLEGUNG" und Zeitstempel
+
+  Szenario: Kautionsminimum wird angewendet (BR-04)
+    Gegeben sei ein Gegenstand "INV-00099" mit Wiederbeschaffungswert 20 Euro und Zustand "verfügbar"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00099" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "kautionsbetrag" 5
+
+  Szenario: Kautionsmaximum wird angewendet (BR-04)
+    Gegeben sei ein Gegenstand "INV-00100" mit Wiederbeschaffungswert 600 Euro und Zustand "verfügbar"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00100" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "kautionsbetrag" 100
+
+  # BR-05 Reservierter Gegenstand ─────────────────────────────────────────────
+
+  Szenario: Ausleihe eines für dieses Mitglied reservierten Gegenstands (BR-05)
+    Gegeben sei der Gegenstand "INV-00042" ist reserviert für Mitglied "M-0815"
+      Und das Mitglied "M-0815" ist nicht gesperrt
+      Und das Mitglied "M-0815" hat 1 aktive Ausleihe
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und der Gegenstand "INV-00042" hat den Zustand "ausgeliehen"
+      Und die Reservierung für Mitglied "M-0815" wurde aufgelöst
+
+  # BR-07 Gesperrtes Mitglied ──────────────────────────────────────────────────
+
+  Szenario: Gesperrtes Mitglied darf nicht ausleihen (BR-07)
+    Gegeben sei der Gegenstand "INV-00042" ist verfügbar
+      Und das Mitglied "M-0815" hat eine überfällige Ausleihe und ist damit gesperrt
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "MITGLIED_GESPERRT"
+      Und der Gegenstand "INV-00042" hat weiterhin den Zustand "verfügbar"
+
+  # BR-06 Ausleihlimit ──────────────────────────────────────────────────────────
+
+  Szenario: Ausleihlimit von 3 ist erreicht (BR-06)
+    Gegeben sei der Gegenstand "INV-00042" ist verfügbar
+      Und das Mitglied "M-0815" ist nicht gesperrt
+      Und das Mitglied "M-0815" hat bereits 3 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "AUSLEIHLIMIT_ERREICHT"
+      Und der Gegenstand "INV-00042" hat weiterhin den Zustand "verfügbar"
+
+  # BR-08 Fehlende Einweisung ───────────────────────────────────────────────────
+
+  Szenario: Einweisungspflichtige Kategorie ohne dokumentierte Einweisung (BR-08)
+    Gegeben sei ein Gegenstand "INV-00050" der Kategorie "Kettensäge"
+      Und die Kategorie "Kettensäge" ist einweisungspflichtig
+      Und der Gegenstand "INV-00050" ist verfügbar
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+      Und für Mitglied "M-0815" liegt keine dokumentierte Einweisung für Kategorie "Kettensäge" vor
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00050" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "EINWEISUNG_FEHLT"
+      Und der Gegenstand "INV-00050" hat weiterhin den Zustand "verfügbar"
+
+  Szenario: Einweisungspflichtige Kategorie mit vorhandener Einweisung ist erlaubt (BR-08)
+    Gegeben sei ein Gegenstand "INV-00050" der Kategorie "Kettensäge"
+      Und die Kategorie "Kettensäge" ist einweisungspflichtig
+      Und der Gegenstand "INV-00050" ist verfügbar
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+      Und für Mitglied "M-0815" liegt eine dokumentierte Einweisung für Kategorie "Kettensäge" vor
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00050" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+
+  # BR-26 Wartungsfälligkeit ───────────────────────────────────────────────────
+
+  Szenario: Wartungsfälliger Gegenstand darf nicht ausgegeben werden (BR-26)
+    Gegeben sei der Gegenstand "INV-00042" hat den Zustand "wartungsfällig"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "GEGENSTAND_WARTUNGSFAELLIG"
+
+  # BR-05 Nicht verfügbar ───────────────────────────────────────────────────────
+
+  Szenario: Gegenstand ist bereits ausgeliehen (BR-05)
+    Gegeben sei der Gegenstand "INV-00042" hat den Zustand "ausgeliehen"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "GEGENSTAND_NICHT_VERFUEGBAR"
+
+  Szenario: Gegenstand ist für ein anderes Mitglied reserviert (BR-05)
+    Gegeben sei der Gegenstand "INV-00042" ist reserviert für Mitglied "M-9999"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "GEGENSTAND_NICHT_VERFUEGBAR"
+
+  # Rollenprüfung ───────────────────────────────────────────────────────────────
+
+  Szenario: Aufruf durch falsche Rolle wird abgelehnt
+    Gegeben sei der Gegenstand "INV-00042" ist verfügbar
+    Wenn ein Mitglied POST /ausleihen sendet mit X-Role "mitglied"
+    Dann antwortet das System mit HTTP 403
+      Und der Fehlercode lautet "ROLLE_UNZULAESSIG"
+----
+
+---
+
+== EARS-Anforderungen
+
+Diese Anforderungen leiten sich direkt aus den Geschäftsregeln ab.
+Die Syntax folgt dem EARS-Standard (Easy Approach to Requirements Syntax).
+
+=== Kautionsberechnung
+
+*EARS-01 (BR-04)*
+When [Leihgut] eine Ausleihe anlegt,
+shall [Leihgut] die Kaution als 20 Prozent des Wiederbeschaffungswerts berechnen, kaufmännisch auf ganze Euro runden, mindestens 5 Euro und höchstens 100 Euro ansetzen.
+
+=== Ausgabebedingungen
+
+*EARS-02 (BR-05)*
+When [Leihgut] eine Ausgabeanforderung erhält,
+shall [Leihgut] die Ausgabe nur dann durchführen, wenn der Gegenstand den Zustand `verfügbar` hat oder den Zustand `reserviert` für genau das anfragende Mitglied.
+
+*EARS-03 (BR-06)*
+When [Leihgut] eine Ausgabeanforderung erhält und das Mitglied bereits drei aktive Ausleihen führt,
+shall [Leihgut] die Ausgabe mit Fehlercode `AUSLEIHLIMIT_ERREICHT` verweigern.
+
+*EARS-04 (BR-07)*
+When [Leihgut] eine Ausgabeanforderung für ein gesperrtes Mitglied erhält,
+shall [Leihgut] die Ausgabe mit Fehlercode `MITGLIED_GESPERRT` verweigern.
+
+*EARS-05 (BR-08)*
+When [Leihgut] eine Ausgabeanforderung für einen Gegenstand einer einweisungspflichtigen Kategorie erhält und für das anfragende Mitglied keine dokumentierte Einweisung für diese Kategorie vorliegt,
+shall [Leihgut] die Ausgabe mit Fehlercode `EINWEISUNG_FEHLT` verweigern.
+
+*EARS-06 (BR-26)*
+When [Leihgut] eine Ausgabeanforderung für einen wartungsfälligen Gegenstand erhält,
+shall [Leihgut] die Ausgabe mit Fehlercode `GEGENSTAND_WARTUNGSFAELLIG` verweigern, unabhängig vom Zustand der Mitgliedschaft.
+
+=== Ausleihe anlegen und Fristen
+
+*EARS-07 (BR-09)*
+When [Leihgut] alle Ausgabebedingungen (BR-05 bis BR-08, BR-26) als erfüllt bewertet,
+shall [Leihgut] eine Ausleihe mit Ausgabedatum und einer Rückgabefrist gleich Ausgabedatum plus Leihdauer der Kategorie anlegen.
+
+=== Kaution und Audit
+
+*EARS-08 (BR-20)*
+When [Leihgut] eine Ausleihe anlegt,
+shall [Leihgut] die berechnete Kaution als Kautionsbewegung vom Typ `HINTERLEGUNG` persistieren.
+
+*EARS-09 (BR-22)*
+When [Leihgut] eine Kautionsbewegung (Hinterlegung, Abzug oder Freigabe) durchführt,
+shall [Leihgut] einen Audit-Eintrag anlegen, der Zeitstempel, Betrag in ganzen Euro und den Auslöser (Ausleihe-ID oder Prüfprotokoll-ID) enthält.
+----

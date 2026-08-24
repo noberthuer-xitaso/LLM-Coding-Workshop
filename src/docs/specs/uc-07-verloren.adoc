@@ -1,0 +1,624 @@
+= UC-07: Gegenstand als verloren erklären
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+== Persona Use Case (Cockburn Fully Dressed)
+
+=== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID            |UC-07
+|Name             |Gegenstand als verloren erklären
+|Scope            |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level            |User Goal
+|Primary Actor    |Rolf (Wart) — entscheidet über den Verluststatus ohne körperliche Rückgabe
+|Sekundäre Akteure|Keine
+|Trigger          |Gegenstand ist überfällig und Mitglied reagiert nicht, oder der Gegenstand ist nachweislich nicht mehr vorhanden
+|Geschäftsregeln  |BR-19, BR-21, BR-22, BR-17, BR-18, BR-23
+|===
+
+=== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interesse
+
+|Rolf (Wart)
+|Einen offensichtlich verlorenen Gegenstand schnell und verbindlich aus dem Bestand ausscheiden können, ohne auf eine körperliche Rückgabe warten zu müssen; keine manuellen Buchungen außerhalb des Systems.
+
+|Karim (Thekendienst)
+|Sicherstellen, dass ein als verloren erklärter Gegenstand nicht versehentlich erneut ausgegeben werden kann; klare Auskunft über den Verbleib hinterlegter Kautionen.
+
+|Mitglied (Entleiher)
+|Nachvollziehbare Begründung, warum die Kaution vollständig einbehalten wird; Klarheit, dass weitergehende Ansprüche außerhalb dieses Systems geregelt werden.
+
+|Verein / Betrieb
+|Lückenlose Nachvollziehbarkeit: jede Kautionsbewegung ist auditierbar; der Bestand ist stets aktuell; keine Grauzone zwischen „noch ausgeliehen" und „faktisch verloren".
+|===
+
+=== Vorbedingungen
+
+. Eine Ausleihe mit der angegebenen `ausleihe_id` existiert und hat den Status *aktiv*.
+. Der Gegenstand befindet sich im Zustand *`ausgeliehen`* — er wurde noch *nicht* an die Theke zurückgebracht. +
+  _(Ist der Gegenstand bereits im Zustand `in_Prüfung`, ist UC-04 zu verwenden.)_
+. Der Aufrufer trägt die Rolle `wart` (Header `X-Role: wart`).
+
+=== Nachbedingungen
+
+==== Erfolgsfall
+
+* Die Ausleihe hat den Status *abgeschlossen*.
+* Der Gegenstand hat den Zustand *`ausgemustert`*.
+* Ein Prüfprotokoll mit Nachzustand `verloren` ist persistent gespeichert und der Ausleihe zugeordnet.
+* Die Kaution ist vollständig einbehalten: Kautionsbewegung „Abzug" über 100 % des hinterlegten Betrags ist gebucht. _(BR-19, BR-21)_
+* Ein Audit-Eintrag zur Kautionsbewegung (Zeitstempel, Betrag, Auslöser = Prüfprotokoll-ID) existiert. _(BR-22)_
+* Der Nutzungszähler des Gegenstands wird um eins erhöht (abgeschlossene Ausleihe). _(BR-23)_
+
+==== Fehlschlag
+
+* Ausleihe, Gegenstand und Kautionssaldo bleiben unverändert.
+* Kein Prüfprotokoll und kein Audit-Eintrag werden angelegt.
+
+=== Hauptszenario
+
+. Rolf ruft `POST /ausleihen/{ausleihe_id}/verloren` mit Header `X-Role: wart` auf und gibt optional eine Begründung im Request Body mit.
+. Das System liest das aktuelle Datum aus der austauschbaren Datumsquelle.
+. Das System lädt die Ausleihe und prüft, ob sie existiert und den Status *aktiv* trägt.
+. Das System prüft, ob der zugehörige Gegenstand den Zustand *`ausgeliehen`* hat.
+. Alle Prüfungen bestehen.
+. Das System legt ein Prüfprotokoll mit folgenden Feldern an _(BR-18)_:
+  * `zeitstempel` = aktueller Zeitstempel (UTC)
+  * `wart_id` = Wert aus `X-Wart-ID`-Header, sofern mitgegeben, sonst `"unbekannt"`
+  * `ausleihe_id` = ID der Ausleihe
+  * `gegenstand_id` = ID des Gegenstands
+  * `kautionsabzug` = voller hinterlegter Kautionsbetrag in ganzen Euro
+  * `nachzustand` = `verloren`
+  * `begruendung` = optionaler Freitext aus dem Request Body
+. Das System bucht die Kautionsbewegung: Abzug in Höhe des vollständigen hinterlegten Betrags. _(BR-19, BR-21)_
+. Das System erzeugt einen Audit-Eintrag: Zeitstempel, Betrag, Auslöser = Prüfprotokoll-ID. _(BR-22)_
+. Das System setzt den Gegenstand-Zustand auf *`ausgemustert`*. _(BR-19)_
+. Das System schließt die Ausleihe ab (Status `abgeschlossen`) und erhöht den Nutzungszähler um eins. _(BR-23)_
+. Das System antwortet mit HTTP 200 und einer Zusammenfassung des Vorgangs.
+. Rolf erhält die Bestätigung; etwaige Forderungen über die Kaution hinaus werden außerhalb des Systems geklärt.
+
+=== Erweiterungen (Extensions)
+
+==== 3a — Ausleihe nicht gefunden
+
+[start=3]
+. Das System findet keine Ausleihe mit der angegebenen `ausleihe_id`.
+.. Das System antwortet mit HTTP 404 und Fehlercode `AUSLEIHE_NICHT_GEFUNDEN`.
+.. Use Case endet ohne Änderung.
+
+==== 3b — Ausleihe nicht aktiv (bereits abgeschlossen)
+
+[start=3]
+. Die Ausleihe existiert, hat aber den Status *abgeschlossen* (Prüfprotokoll liegt bereits vor).
+.. Das System antwortet mit HTTP 409 und Fehlercode `AUSLEIHE_BEREITS_ABGESCHLOSSEN`.
+.. Use Case endet ohne Änderung.
+
+==== 4a — Gegenstand bereits zurückgegeben (Zustand `in_Prüfung`) — UC-04 verwenden
+
+[start=4]
+. Das System stellt fest, dass der Gegenstand den Zustand `in_Prüfung` trägt: er wurde physisch zurückgegeben, aber das Prüfprotokoll steht noch aus.
+.. Das System antwortet mit HTTP 409 und Fehlercode `GEGENSTAND_IN_PRUEFUNG`.
+.. Hinweis in der Fehlermeldung: Für Gegenstände im Zustand `in_Prüfung` ist UC-04 (Prüfprotokoll erstellen) zu verwenden.
+.. Use Case endet ohne Änderung.
+
+==== 4b — Gegenstand bereits ausgemustert
+
+[start=4]
+. Das System stellt fest, dass der Gegenstand bereits den Zustand `ausgemustert` trägt.
+.. Das System antwortet mit HTTP 409 und Fehlercode `GEGENSTAND_BEREITS_AUSGEMUSTERT`.
+.. Use Case endet ohne Änderung.
+
+---
+
+== System Use Cases
+
+=== REST-Endpunkt
+
+`POST /ausleihen/{ausleihe_id}/verloren`
+
+[cols="1,3"]
+|===
+|Methode |POST
+|Pfad    |`/ausleihen/{ausleihe_id}/verloren`
+|Rolle   |`wart` (Header `X-Role: wart`)
+|===
+
+==== Eingabe
+
+[cols="1,1,3"]
+|===
+|Parameter |Typ |Beschreibung
+
+|`ausleihe_id`
+|Path-Parameter, UUID
+|Eindeutige ID der Ausleihe, deren Gegenstand als verloren erklärt werden soll.
+
+|`X-Role`
+|HTTP-Header, String
+|Muss den Wert `wart` tragen. Wird nicht kryptographisch geprüft.
+
+|`X-Wart-ID`
+|HTTP-Header, String (optional)
+|Identifikator des handelnden Warts für das Prüfprotokoll. Wird nicht geprüft; fehlt der Header, wird `"unbekannt"` eingetragen.
+|===
+
+Request Body (optional):
+
+[source,json]
+----
+{
+  "begruendung": "string (optional, max. 1000 Zeichen)"
+}
+----
+
+Ein leerer Body (`{}`) ist gültig.
+
+==== Validierung und Verarbeitung
+
+[cols="1,4,3"]
+|===
+|Schritt |Prüfung / Aktion |Fehler bei Verletzung
+
+|V1
+|`ausleihe_id` ist eine gültige UUID; Ausleihe existiert in der Datenbank.
+|404 `AUSLEIHE_NICHT_GEFUNDEN`
+
+|V2
+|Ausleihe hat den Status `aktiv` (noch kein Prüfprotokoll vorhanden).
+|409 `AUSLEIHE_BEREITS_ABGESCHLOSSEN`
+
+|V3
+|Gegenstand hat den Zustand `ausgeliehen` (nicht `in_Prüfung`, nicht `ausgemustert`). _(BR-19)_
+|409 `GEGENSTAND_IN_PRUEFUNG` bzw. `GEGENSTAND_BEREITS_AUSGEMUSTERT`
+
+|P1
+|Prüfprotokoll anlegen: `zeitstempel`, `wart_id`, `ausleihe_id`, `gegenstand_id`, `kautionsabzug` = volle Kaution, `nachzustand = verloren`, `begruendung` (optional). _(BR-18, BR-19)_
+|—
+
+|P2
+|Kautionsbewegung buchen: Abzug über den vollständigen hinterlegten Betrag. _(BR-19, BR-21)_
+|—
+
+|P3
+|Audit-Eintrag schreiben: `{zeitstempel, betrag, ausloser: pruefprotokoll_id}`. _(BR-22)_
+|—
+
+|P4
+|Gegenstand-Zustand auf `ausgemustert` setzen. _(BR-19)_
+|—
+
+|P5
+|Ausleihe-Status auf `abgeschlossen` setzen. _(BR-19)_
+|—
+
+|P6
+|Nutzungszähler des Gegenstands um 1 erhöhen. _(BR-23)_
+|—
+|===
+
+==== Ausgabe — HTTP 200
+
+[source,json]
+----
+{
+  "ausleihe_id": "a1b2c3d4-0000-0000-0000-000000000001",
+  "gegenstand_id": "g0042",
+  "mitglied_id": "m0815",
+  "pruefprotokoll_id": "pp-0099",
+  "nachzustand": "verloren",
+  "gegenstand_zustand": "ausgemustert",
+  "ausleihe_status": "abgeschlossen",
+  "kautionsabzug_eur": 40,
+  "audit_eintrag_id": "ae-0201",
+  "zeitstempel": "2026-08-24T10:15:00Z",
+  "begruendung": "Mitglied reagiert seit vier Wochen nicht auf Mahnungen."
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Fehlercode |Bedeutung
+
+|400
+|`UNGUELTIGE_AUSLEIHE_ID`
+|`ausleihe_id` ist keine gültige UUID.
+
+|403
+|`ROLLE_NICHT_BERECHTIGT`
+|Header `X-Role` fehlt oder trägt nicht den Wert `wart`.
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Keine Ausleihe mit dieser ID vorhanden.
+
+|409
+|`AUSLEIHE_BEREITS_ABGESCHLOSSEN`
+|Ausleihe ist bereits abgeschlossen (Prüfprotokoll liegt vor).
+
+|409
+|`GEGENSTAND_IN_PRUEFUNG`
+|Gegenstand wurde physisch zurückgegeben und befindet sich im Zustand `in_Prüfung`. UC-04 verwenden.
+
+|409
+|`GEGENSTAND_BEREITS_AUSGEMUSTERT`
+|Gegenstand ist bereits ausgemustert.
+|===
+
+Fehlerantwort-Body (einheitlich):
+
+[source,json]
+----
+{
+  "fehlercode": "GEGENSTAND_IN_PRUEFUNG",
+  "meldung": "Der Gegenstand wurde bereits physisch zurückgegeben und befindet sich in Prüfung. Bitte UC-04 (Prüfprotokoll erstellen) verwenden.",
+  "ausleihe_id": "a1b2c3d4-0000-0000-0000-000000000001"
+}
+----
+
+---
+
+=== CLI-Kommando
+
+`leihgut verloren melden --ausleihe-id <id> [--begruendung <text>]`
+
+==== Syntax
+
+[source,shell]
+----
+leihgut verloren melden \
+  --ausleihe-id <UUID> \
+  [--begruendung "<Freitext>"]
+----
+
+==== Parameter
+
+[cols="1,1,3"]
+|===
+|Flag |Pflicht |Beschreibung
+
+|`--ausleihe-id`
+|ja
+|UUID der aktiven Ausleihe.
+
+|`--begruendung`
+|nein
+|Optionaler Freitext für das Prüfprotokoll (max. 1000 Zeichen). Muss in Anführungszeichen stehen, wenn er Leerzeichen enthält.
+|===
+
+Die CLI sendet intern `POST /ausleihen/{ausleihe_id}/verloren` mit Header `X-Role: wart`.
+
+==== Erfolgsausgabe
+
+[source]
+----
+✔ Gegenstand als verloren erklärt.
+
+  Ausleihe-ID     : a1b2c3d4-0000-0000-0000-000000000001
+  Gegenstand-ID   : g0042
+  Mitglied-ID     : m0815
+  Prüfprotokoll   : pp-0099
+  Nachzustand     : verloren
+  Gegenstand      : ausgemustert
+  Kaution (100 %) : 40 EUR einbehalten
+  Zeitstempel     : 2026-08-24T10:15:00Z
+
+  Weitergehende Forderungen sind außerhalb dieses Systems zu klären.
+----
+
+==== Fehlerausgaben
+
+[source]
+----
+✗ Fehler: AUSLEIHE_NICHT_GEFUNDEN
+  Keine aktive Ausleihe mit ID "a1b2c3d4-..." gefunden.
+
+✗ Fehler: GEGENSTAND_IN_PRUEFUNG
+  Der Gegenstand befindet sich bereits in Prüfung.
+  Bitte 'leihgut pruefprotokoll erstellen' (UC-04) verwenden.
+
+✗ Fehler: AUSLEIHE_BEREITS_ABGESCHLOSSEN
+  Die Ausleihe ist bereits abgeschlossen.
+----
+
+---
+
+== Aktivitätsdiagramm (PlantUML)
+
+[plantuml]
+----
+@startuml UC-07 Gegenstand als verloren erklären
+
+skinparam defaultFontName "Liberation Sans"
+skinparam activityBackgroundColor #F9F9F9
+skinparam activityBorderColor #555555
+skinparam swimlaneBorderColor #888888
+skinparam arrowColor #333333
+
+|Rolf (Wart)|
+start
+:POST /ausleihen/{ausleihe_id}/verloren\nX-Role: wart\n[Body: begruendung (optional)];
+
+|System|
+:ausleihe_id validieren;
+if (gültige UUID?) then (nein)
+  :HTTP 400\nUNGUELTIGE_AUSLEIHE_ID;
+  stop
+else (ja)
+endif
+
+:Rolle prüfen (X-Role: wart);
+if (Rolle = wart?) then (nein)
+  :HTTP 403\nROLLE_NICHT_BERECHTIGT;
+  stop
+else (ja)
+endif
+
+:Ausleihe laden;
+if (Ausleihe gefunden?) then (nein)
+  :HTTP 404\nAUSLEIHE_NICHT_GEFUNDEN;
+  stop
+else (ja)
+endif
+
+if (Ausleihe-Status = aktiv?) then (nein)
+  :HTTP 409\nAUSLEIHE_BEREITS_ABGESCHLOSSEN;
+  stop
+else (ja)
+endif
+
+:Gegenstand-Zustand laden;
+if (Zustand = ausgeliehen?) then (nein)
+  if (Zustand = in_Prüfung?) then (ja)
+    :HTTP 409\nGEGENSTAND_IN_PRUEFUNG\n(→ UC-04 verwenden);
+    stop
+  else (nein — ausgemustert)
+    :HTTP 409\nGEGENSTAND_BEREITS_AUSGEMUSTERT;
+    stop
+  endif
+else (ja)
+endif
+
+:aktuellen Zeitstempel lesen\n(austauschbare Datumsquelle);
+:Prüfprotokoll anlegen\nnachzustand = verloren\nkautionsabzug = volle Kaution\n[BR-18, BR-19];
+
+fork
+  :Kautionsbewegung buchen\nAbzug = 100 % der Kaution\n[BR-19, BR-21];
+  :Audit-Eintrag schreiben\nZeitstempel, Betrag,\nAuslöser = Prüfprotokoll-ID\n[BR-22];
+fork again
+  :Gegenstand-Zustand → ausgemustert\n[BR-19];
+fork again
+  :Ausleihe → abgeschlossen\n[BR-19];
+  :Nutzungszähler + 1\n[BR-23];
+end fork
+
+:HTTP 200\nZusammenfassung (ausleihe_id, gegenstand_id,\npruefprotokoll_id, kautionsabzug_eur,\nnachzustand, zeitstempel);
+stop
+
+|Rolf (Wart)|
+:Bestätigung erhalten;\nnote right: Weitergehende Forderungen\naußerhalb des Systems
+stop
+
+@enduml
+----
+
+---
+
+== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-07 Gegenstand als verloren erklären
+
+  Grundlage:
+    Angenommen das aktuelle Datum ist "2026-08-24"
+    Und der Gegenstand "g0042" hat einen Wiederbeschaffungswert von 200 EUR
+    Und die berechnete Kaution für Gegenstand "g0042" beträgt 40 EUR
+
+  Szenario: Erfolgreiche Verloren-Erklärung
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-007" auf Gegenstand "g0042"
+    Und der Gegenstand "g0042" hat den Zustand "ausgeliehen"
+    Und für Ausleihe "a-007" ist eine Kaution von 40 EUR hinterlegt
+    Wenn der Wart POST /ausleihen/a-007/verloren mit Header X-Role: wart aufruft
+    Und den Body '{"begruendung": "Mitglied reagiert nicht auf Mahnungen."}' mitschickt
+    Dann antwortet das System mit HTTP 200
+    Und die Ausleihe "a-007" hat den Status "abgeschlossen"
+    Und der Gegenstand "g0042" hat den Zustand "ausgemustert"
+    Und ein Prüfprotokoll mit nachzustand "verloren" und ausleihe_id "a-007" existiert
+    Und die Begründung im Prüfprotokoll lautet "Mitglied reagiert nicht auf Mahnungen."
+
+  Szenario: Kaution vollständig einbehalten (BR-19, BR-21)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-007" auf Gegenstand "g0042"
+    Und der Gegenstand "g0042" hat den Zustand "ausgeliehen"
+    Und für Ausleihe "a-007" ist eine Kaution von 40 EUR hinterlegt
+    Wenn der Wart POST /ausleihen/a-007/verloren mit Header X-Role: wart aufruft
+    Dann antwortet das System mit HTTP 200
+    Und der kautionsabzug_eur in der Response beträgt 40
+    Und der Kautionssaldo für Ausleihe "a-007" beträgt 0 EUR (vollständig einbehalten)
+    Und die Kaution wurde nicht teilweise freigegeben
+
+  Szenario: Audit-Eintrag für Kautionsbewegung vorhanden (BR-22)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-007" auf Gegenstand "g0042"
+    Und der Gegenstand "g0042" hat den Zustand "ausgeliehen"
+    Und für Ausleihe "a-007" ist eine Kaution von 40 EUR hinterlegt
+    Wenn der Wart POST /ausleihen/a-007/verloren mit Header X-Role: wart aufruft
+    Dann existiert ein Audit-Eintrag mit Betrag 40 EUR
+    Und der Audit-Eintrag verweist auf die Prüfprotokoll-ID aus der Response
+    Und der Audit-Eintrag enthält einen Zeitstempel
+
+  Szenario: Gegenstand nach Verloren-Erklärung ausgemustert
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-007" auf Gegenstand "g0042"
+    Und der Gegenstand "g0042" hat den Zustand "ausgeliehen"
+    Wenn der Wart POST /ausleihen/a-007/verloren mit Header X-Role: wart aufruft
+    Dann hat der Gegenstand "g0042" den Zustand "ausgemustert"
+    Und der Gegenstand "g0042" kann nicht mehr ausgegeben werden
+    Und der Gegenstand "g0042" kann nicht mehr reserviert werden
+
+  Szenario: Fehler – Ausleihe nicht aktiv (bereits abgeschlossen)
+    Angenommen die Ausleihe "a-008" ist abgeschlossen (Prüfprotokoll liegt vor)
+    Wenn der Wart POST /ausleihen/a-008/verloren mit Header X-Role: wart aufruft
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "AUSLEIHE_BEREITS_ABGESCHLOSSEN"
+    Und die Ausleihe "a-008" bleibt unverändert
+
+  Szenario: Fehler – Gegenstand bereits in Prüfung (→ UC-04 verwenden)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-009" auf Gegenstand "g0043"
+    Und der Gegenstand "g0043" hat den Zustand "in_Prüfung" (physisch zurückgegeben)
+    Wenn der Wart POST /ausleihen/a-009/verloren mit Header X-Role: wart aufruft
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "GEGENSTAND_IN_PRUEFUNG"
+    Und die Meldung enthält einen Hinweis auf UC-04
+    Und kein Prüfprotokoll wurde angelegt
+
+  Szenario: Fehler – Ausleihe nicht gefunden
+    Wenn der Wart POST /ausleihen/nicht-vorhanden-uuid/verloren mit Header X-Role: wart aufruft
+    Dann antwortet das System mit HTTP 404
+    Und der Fehlercode lautet "AUSLEIHE_NICHT_GEFUNDEN"
+
+  Szenario: Verloren-Erklärung ohne Begründung (Begründung optional)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-010" auf Gegenstand "g0044"
+    Und der Gegenstand "g0044" hat den Zustand "ausgeliehen"
+    Wenn der Wart POST /ausleihen/a-010/verloren mit Header X-Role: wart und leerem Body aufruft
+    Dann antwortet das System mit HTTP 200
+    Und die Ausleihe "a-010" hat den Status "abgeschlossen"
+    Und das Prüfprotokoll enthält kein Begründungsfeld oder ein leeres Begründungsfeld
+----
+
+---
+
+== EARS-Anforderungen
+
+=== Kategorien-Legende
+
+[horizontal]
+UBIQUITOUS::   Stets gültige Systemanforderung.
+EVENT-DRIVEN:: Das System soll auf ein Ereignis reagieren.
+STATE-DRIVEN:: Das System soll in einem definierten Zustand ein Verhalten zeigen.
+UNWANTED::     Das System soll ein unerwünschtes Verhalten verhindern.
+OPTIONAL::     Das System kann ein Verhalten anbieten.
+
+---
+
+=== REQ-UC07-01 — Verloren erklären ohne körperliche Rückgabe (Event-Driven)
+
+_Wenn_ ein Aufrufer mit der Rolle `wart` `POST /ausleihen/{ausleihe_id}/verloren` aufruft und die Ausleihe aktiv ist und der Gegenstand den Zustand `ausgeliehen` hat, _soll_ das System ein Prüfprotokoll mit Nachzustand `verloren` anlegen, die Kaution vollständig einbehalten, den Gegenstand auf `ausgemustert` setzen, die Ausleihe abschließen und HTTP 200 zurückgeben.
+
+_Referenz: BR-19_
+
+---
+
+=== REQ-UC07-02 — Vollständiger Kautionseinbehalt (Ubiquitous)
+
+Das System _soll_ beim Verloren-Erklären eines Gegenstands den Kautionsabzug stets auf den vollständigen hinterlegten Betrag setzen. Ein niedrigerer Abzug ist für den Nachzustand `verloren` nicht zulässig.
+
+_Referenz: BR-19, BR-21_
+
+---
+
+=== REQ-UC07-03 — Audit-Eintrag je Kautionsbewegung (Ubiquitous)
+
+Das System _soll_ für jede beim Verloren-Erklären ausgelöste Kautionsbewegung einen Audit-Eintrag erzeugen, der mindestens enthält: Zeitstempel (UTC), Betrag in ganzen Euro, Auslöser als Verweis auf die Prüfprotokoll-ID.
+
+_Referenz: BR-22_
+
+---
+
+=== REQ-UC07-04 — Gegenstand in Endzustand überführen (Ubiquitous)
+
+Das System _soll_ den Gegenstand nach einer erfolgreichen Verloren-Erklärung dauerhaft in den Zustand `ausgemustert` versetzen. Aus diesem Zustand gibt es keinen weiteren Übergang.
+
+_Referenz: BR-17, BR-19_
+
+---
+
+=== REQ-UC07-05 — Sperrung bei Gegenstand in Prüfung (Unwanted)
+
+_Das System soll verhindern_, dass `POST /ausleihen/{ausleihe_id}/verloren` für eine Ausleihe ausgeführt wird, deren Gegenstand sich bereits im Zustand `in_Prüfung` befindet. Bei einem solchen Versuch antwortet das System mit HTTP 409 und Fehlercode `GEGENSTAND_IN_PRUEFUNG`; die Fehlermeldung enthält einen Hinweis, dass UC-04 zu verwenden ist.
+
+_Referenz: BR-19 (Vorbedingung: Zustand `ausgeliehen`)_
+
+---
+
+=== REQ-UC07-06 — Sperrung bei bereits abgeschlossener Ausleihe (Unwanted)
+
+_Das System soll verhindern_, dass eine bereits abgeschlossene Ausleihe erneut als verloren erklärt wird. Bei einem solchen Versuch antwortet das System mit HTTP 409 und Fehlercode `AUSLEIHE_BEREITS_ABGESCHLOSSEN`; Ausleihe und Gegenstand bleiben unverändert.
+
+_Referenz: BR-19_
+
+---
+
+=== REQ-UC07-07 — Rollenbeschränkung auf Wart (Unwanted)
+
+_Das System soll verhindern_, dass der Endpunkt `POST /ausleihen/{ausleihe_id}/verloren` von Aufrufern ohne die Rolle `wart` erfolgreich genutzt wird. Fehlt der Header `X-Role: wart`, antwortet das System mit HTTP 403 und Fehlercode `ROLLE_NICHT_BERECHTIGT`.
+
+_Referenz: PRD — Authentifizierung; BR-19 (Wart als einziger Akteur)_
+
+---
+
+=== REQ-UC07-08 — Nutzungszähler bei Abschluss (Ubiquitous)
+
+Das System _soll_ den Nutzungszähler des Gegenstands beim Abschluss der Ausleihe durch Verloren-Erklärung um eins erhöhen, gleichwertig mit einem regulären Abschluss durch Prüfprotokoll.
+
+_Referenz: BR-23_
+
+---
+
+=== REQ-UC07-09 — Optionaler Begründungstext (Optional)
+
+Das System _kann_ im Request Body ein optionales Freitext-Feld `begruendung` (max. 1000 Zeichen) entgegennehmen und es im Prüfprotokoll persistent speichern. Fehlt das Feld, wird das Prüfprotokoll ohne Begründung angelegt.
+
+_Referenz: BR-18 (optionales Freitextfeld)_
+
+---
+
+=== REQ-UC07-10 — Datumsquelle austauschbar (Ubiquitous)
+
+Das System _soll_ den Zeitstempel des Prüfprotokolls und des Audit-Eintrags ausschließlich über eine austauschbare Datumsquelle beziehen (kein direkter Systemaufruf), damit der Vorgang in automatisierten Tests deterministisch reproduziert werden kann.
+
+_Referenz: PRD — Zeit_
+
+---
+
+=== REQ-UC07-11 — Antwortzeit (State-Driven)
+
+_Während_ das System unter Normallast (bis zu 800 Mitglieder, bis zu 400 aktive Gegenstände) betrieben wird, _soll_ der Endpunkt `POST /ausleihen/{ausleihe_id}/verloren` am 95. Perzentil über 100 aufeinanderfolgende Aufrufe in unter 300 ms antworten.
+
+_Referenz: PRD — Qualitätsziele / Antwortzeit_
+
+---
+
+=== REQ-UC07-12 — Keine systemseitigen Forderungen über die Kaution hinaus (Ubiquitous)
+
+Das System _soll_ keine Forderungen, Mahnungen oder Buchungen erzeugen, die über den vollständigen Einbehalt der hinterlegten Kaution hinausgehen. Derartige Ansprüche entstehen und werden ausschließlich außerhalb dieses Systems geregelt.
+
+_Referenz: PRD — Was dieses System nicht ist; BR-19_
+
+---
+
+== Abgrenzung zu verwandten Use Cases
+
+[cols="1,3"]
+|===
+|Use Case |Beziehung
+
+|UC-03 (Gegenstand zurücknehmen)
+|UC-03 setzt eine physische Rückgabe an der Theke voraus und versetzt den Gegenstand in `in_Prüfung`. UC-07 greift, wenn *keine* physische Rückgabe stattgefunden hat (Zustand bleibt bis zur Aktion `ausgeliehen`).
+
+|UC-04 (Prüfprotokoll erstellen)
+|UC-04 schließt eine Ausleihe ab, bei der der Gegenstand bereits in `in_Prüfung` ist. Ist der Gegenstand noch `ausgeliehen` und gilt als verloren, ist UC-07 zu verwenden, nicht UC-04.
+
+|UC-01 (Gegenstand ausleihen)
+|Erzeugt die Ausleihe und die Kautionshinterlegung, die UC-07 voraussetzt.
+|===
