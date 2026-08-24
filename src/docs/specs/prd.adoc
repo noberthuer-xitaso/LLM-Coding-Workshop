@@ -3,8 +3,8 @@
 :toclevels: 3
 :sectnums:
 :icons: font
-:revnumber: 1.0
-:revdate: 2026-08-11
+:revnumber: 1.1
+:revdate: 2026-08-24
 
 == Problem
 
@@ -116,6 +116,31 @@ Die Vergabe von BR-IDs, die Zerlegung in atomare Regeln und die Zuordnung zu Use
 * Jeder Gegenstand hat einen Wiederbeschaffungswert in Euro.
 * Die Kaution beträgt 20 Prozent des Wiederbeschaffungswerts, kaufmännisch gerundet auf ganze Euro, mindestens 5 und höchstens 100 Euro.
 
+=== Zustandsautomat des Gegenstands
+
+Ein Gegenstand befindet sich zu jedem Zeitpunkt in genau einem dieser Zustände:
+
+[horizontal]
+verfügbar:: Kann ausgegeben oder reserviert werden.
+ausgeliehen:: Ausgegeben; Rückgabe steht aus.
+in Prüfung:: An der Theke zurückgegeben; Prüfprotokoll steht aus.
+reserviert:: Einem Mitglied für drei Kalendertage zugeteilt; Ausgabe steht aus.
+wartungsfällig:: Wartungsintervall erreicht; darf nicht ausgegeben und nicht reserviert werden.
+ausgemustert:: Endzustand; verloren oder irreparabel.
+
+Erlaubte Übergänge:
+
+* verfügbar → ausgeliehen (Ausgabe)
+* ausgeliehen → in Prüfung (Rückgabe an der Theke)
+* in Prüfung → verfügbar (Prüfprotokoll abgeschlossen, Wartungsintervall nicht erreicht, keine offene Vormerkung)
+* in Prüfung → reserviert (Prüfprotokoll abgeschlossen, Wartungsintervall nicht erreicht, offene Vormerkung vorhanden)
+* in Prüfung → wartungsfällig (Prüfprotokoll abgeschlossen, Wartungsintervall erreicht)
+* in Prüfung → ausgemustert (Prüfprotokoll mit Nachzustand "ausgemustert" oder "verloren")
+* reserviert → ausgeliehen (Ausgabe an das reservierende Mitglied)
+* reserviert → verfügbar (Reservierung verfallen, keine weitere Vormerkung in der Kategorie)
+* reserviert → reserviert (Reservierung verfallen, nächste Vormerkung in der Kategorie vorhanden)
+* wartungsfällig → verfügbar (Wartung abgeschlossen)
+
 === Ausleihe
 
 * Ein Gegenstand wird nur ausgegeben, wenn er verfügbar oder für dieses Mitglied reserviert ist.
@@ -144,6 +169,11 @@ Wer dem Mitglied gegenübersteht, soll nicht über dessen Geld entscheiden.
 Begründung: Das Prüfprotokoll ist die einzige belastbare Quelle.
 Alles andere wäre Aussage gegen Aussage.
 * Nach der Prüfung geht der Gegenstand in genau einen dieser Zustände: verfügbar, wartungsfällig oder ausgemustert.
+* Ein Prüfprotokoll enthält: Zeitstempel, Wart-ID, Ausleihe-ID, Gegenstand-ID, Kautionsabzug in ganzen Euro, Nachzustand (verfügbar / wartungsfällig / ausgemustert / verloren) und ein optionales Freitextfeld für die Begründung.
+  Der Nachzustand wird explizit gesetzt, nicht aus anderen Feldern abgeleitet.
+* Der Wart kann einen Gegenstand als verloren erklären, ohne dass eine körperliche Rückgabe vorausgegangen ist.
+  Er erstellt dazu ein Prüfprotokoll mit Nachzustand "verloren".
+  Die Ausleihe wird dadurch abgeschlossen; die Kaution wird vollständig einbehalten und der Gegenstand ausgemustert.
 
 === Kaution
 
@@ -160,11 +190,13 @@ Alles andere wäre Aussage gegen Aussage.
 +
 Begründung: Nutzung lässt sich zählen, Betriebsstunden kann an der Theke niemand messen.
 * Der Wart setzt einen wartungsfälligen Gegenstand nach erledigter Wartung auf verfügbar und den Nutzungszähler auf null.
+  Das Abschließen einer Wartung ist eine eigenständige Aktion — kein Prüfprotokoll, keine Ausleihe-ID.
 * Ein wartungsfälliger Gegenstand wird nicht ausgegeben und nicht reserviert.
 
 === Vormerkung
 
 * Eine Vormerkung gilt für eine Kategorie, nicht für einen einzelnen Gegenstand.
+* Ein Mitglied darf je Kategorie höchstens eine Vormerkung haben.
 * Vormerkungen einer Kategorie bilden eine Warteschlange nach Eingangszeit.
 * Wird ein Gegenstand nach der Prüfung verfügbar und liegt eine Vormerkung vor, wird er für das erste Mitglied der Warteschlange reserviert.
 * Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung.
