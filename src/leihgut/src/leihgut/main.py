@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from leihgut.api import audit as audit_router
 from leihgut.api import katalog as katalog_router
 from leihgut.infrastructure.datenbank import erstelle_tabellen
 
@@ -24,6 +25,7 @@ app = FastAPI(
 )
 
 app.include_router(katalog_router.router)
+app.include_router(audit_router.router)
 
 
 @app.exception_handler(HTTPException)
