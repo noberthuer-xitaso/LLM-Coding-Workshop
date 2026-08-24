@@ -4,6 +4,7 @@ inputPath = 'src/docs'
 
 inputFiles = [
     [file: 'index.adoc',                                    formats: ['html5']],
+    [file: 'arc42/arc42.adoc',                              formats: ['html5']],
     [file: 'specs/prd.adoc',                                formats: ['html5']],
     [file: 'specs/business-rules.adoc',                     formats: ['html5']],
     [file: 'specs/uc-01-ausleihe.adoc',                     formats: ['html5']],
