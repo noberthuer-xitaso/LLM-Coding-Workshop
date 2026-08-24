@@ -22,6 +22,10 @@ Jede Entscheidung ist mit dem Qualitätsziel oder der Randbedingung verknüpft, 
 |===
 |Entscheidung |Kurzbegründung |Adressiertes Ziel / Randbedingung
 
+|Tech-Stack: Python + FastAPI + SQLModel
+|Geringe Einstiegshürde, automatische OpenAPI-Generierung, pytest-bdd für Gherkin-Tests, SQLModel für SQLite ohne Doppel-Mapping.
+|OC-03; Wartbarkeit; TC-07
+
 |Domain-Driven Design mit Ubiquitous Language
 |Alle Bezeichner im Code stammen direkt aus dem Glossar des PRD; keine Übersetzung in technische Synonyme.
 |OC-03; Korrektheit der Kaution (QZ-2)
@@ -50,6 +54,51 @@ Jede Entscheidung ist mit dem Qualitätsziel oder der Randbedingung verknüpft, 
 |Das aktuelle Datum wird über eine injizierbare Schnittstelle geliefert; Tests übergeben einen Fixwert.
 |TC-07; Korrektheit der Kaution (QZ-2)
 |===
+
+=== Tech-Stack
+
+[cols="1,2,2", options="header"]
+|===
+|Komponente |Technologie |Begründung
+
+|Sprache
+|Python 3.12
+|Lesbar für Ehrenamtliche; kein Build-Schritt; umfangreiches Ökosystem.
+
+|HTTP-Framework
+|FastAPI
+|Generiert OpenAPI-Spec automatisch aus Pydantic-Modellen; asynchron via ASGI.
+
+|Validierung
+|Pydantic v2
+|Erzwingt Validation-Rules aus der Spec auf Typ-Ebene; Laufzeit-Fehler statt Datenbankfehler.
+
+|ORM / DB-Zugriff
+|SQLModel (= SQLAlchemy + Pydantic)
+|Ein einziges Modell für DB-Schema und API-Schema; kein doppeltes Mapping.
+
+|Datenbank
+|SQLite (WAL-Modus)
+|Kein externer DB-Server; PostgreSQL als Migrationspfad ohne Domänenänderungen.
+
+|ASGI-Server
+|Uvicorn
+|Eingebettet, kein externer Webserver; Startbefehl: `uv run uvicorn leihgut.main:app`.
+
+|CLI
+|Typer
+|Typisierte Kommandogruppen; ruft REST-API auf localhost auf.
+
+|Test-Framework
+|pytest + pytest-bdd
+|Gherkin-Feature-Files aus den UC-Specs direkt lauffähig.
+
+|Dependency-Mgmt
+|uv
+|Reproduzierbare Builds via `uv.lock`; schnelle Installation ohne Pip-Overhead.
+|===
+
+Die Entscheidung für diesen Stack ist in ADR-008 dokumentiert.
 
 === Domain-Driven Design und Ubiquitous Language
 

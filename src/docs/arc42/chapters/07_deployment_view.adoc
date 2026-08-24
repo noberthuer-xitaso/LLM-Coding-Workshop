@@ -41,7 +41,7 @@ title Leihgut — Verteilungssicht
 
 Deployment_Node(vereinsrechner, "Vereinsrechner", "Linux / macOS / Windows\nlokaler Rechner im Vereinsraum") {
 
-    Deployment_Node(jvm, "Leihgut-Prozess", "JVM oder natives Executable\nPort 8080") {
+    Deployment_Node(jvm, "Leihgut-Prozess", "Python 3.12 + Uvicorn\nPort 8080") {
         Container(api, "REST-API-Server", "HTTP/JSON", "Verarbeitet alle fachlichen Anfragen.\nPrüft Geschäftsregeln, steuert Domain und Persistenz.")
     }
 
@@ -62,7 +62,7 @@ Rel(theke, api, "HTTP/JSON", "GET /gegenstände, POST /ausleihen, …")
 Rel(mitglied, api, "HTTP/JSON", "GET /gegenstände, POST /vormerkungen, …")
 Rel(wart, cli, "Terminal", "leihgut pruefprotokoll …\nleihgut wartung abschliessen …")
 Rel(cli, api, "HTTP/JSON", "Intern: localhost:8080")
-Rel(api, db, "JDBC / SQLite-Treiber", "Lesen und Schreiben")
+Rel(api, db, "SQLModel / SQLAlchemy", "Lesen und Schreiben")
 @enduml
 ....
 
@@ -78,18 +78,18 @@ Rel(api, db, "JDBC / SQLite-Treiber", "Lesen und Schreiben")
 Kein Server-Rack, keine VM, keine Container.
 
 |Leihgut-Prozess
-|JVM (Java/Kotlin/Clojure …) oder natives Executable, Port 8080
+|Python 3.12 + Uvicorn (ASGI), Port 8080
 |Startet mit `leihgut serve --port 8080`.
 Hält REST-API und Geschäftslogik im selben Prozess.
 
 |REST-API-Server
-|Eingebetteter HTTP-Server (z. B. Ktor, Spring Boot, Micronaut …)
+|FastAPI + Pydantic v2 + SQLModel
 |Nimmt HTTP-Requests auf Port 8080 entgegen.
-Antwortet mit JSON.
-Kein TLS erforderlich (Lokal­betrieb).
+Generiert OpenAPI-Dokumentation automatisch aus Pydantic-Modellen.
+Antwortet mit JSON. Kein TLS erforderlich (Lokal­betrieb).
 
 |CLI
-|Separates Executable oder Subcommand desselben Binaries
+|Typer (Python) — Subcommand desselben Pakets
 |Werkzeug für den Wart.
 Übersetzt Terminal­eingaben in REST-Calls gegen localhost:8080.
 
@@ -151,11 +151,18 @@ Diese Deployment-Optionen sind explizit außerhalb des Scopes.
 Das System ist für den Einzelprozess­betrieb auf einem Vereinsrechner konzipiert.
 
 Konfiguration::
-Minimale Konfiguration über Umgebungsvariablen oder eine `application.properties`-Datei:
+Minimale Konfiguration über Umgebungsvariablen oder eine `.env`-Datei (Pydantic Settings):
 +
-[source,properties]
+[source,dotenv]
 ----
-leihgut.port=8080
-leihgut.db.path=./data/leihgut.db
-leihgut.datum.quelle=SYSTEM   # oder FIXED für Tests
+LEIHGUT_PORT=8080
+LEIHGUT_DB_PATH=./data/leihgut.db
+LEIHGUT_DATUM_QUELLE=SYSTEM   # oder FIXED für Tests
+----
++
+Startbefehl für Entwicklung:
++
+[source,shell]
+----
+uv run uvicorn leihgut.main:app --port 8080
 ----

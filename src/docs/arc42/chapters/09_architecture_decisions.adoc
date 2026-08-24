@@ -576,6 +576,146 @@ Kein Mailversand, keine Zahlungsanbindung, keine Cloud-Abhängigkeit.
 * PRD, Abschnitt „Qualitätsziele": Verfügbarkeit ist explizit kein Qualitätsziel.
 * ADR-002: Lazy Evaluation für Reservierungsverfall setzt das Fehlen eines Hintergrundprozesses voraus.
 
+---
+
+=== ADR-008: Tech-Stack — Python, FastAPI, SQLModel, SQLite
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Nach der Festlegung auf eine REST-API (ADR-001), SQLite als primäre Datenbank (arc42, Kapitel 5+7) und einen Einzelprozess ohne externe Dienste (ADR-007) muss die konkrete Implementierungssprache und der Framework-Stack bestimmt werden.
+
+Kriterien:
+
+* *Lesbarkeit / Wartbarkeit* für ehrenamtliche Nachfolger (kein aktives Entwicklungsteam)
+* *Ubiquitous Language*: Deutsche Domänenbegriffe müssen 1:1 im Code erscheinen
+* *Testbarkeit*: Gherkin-Szenarien aus den Use-Case-Spezifikationen sollen direkt ausführbar sein
+* *Geringe Einstiegshürde*: Kein komplexes Build-System; ein einziger `pip install`-Befehl genügt
+* *Automatische API-Dokumentation*: OpenAPI-Spec soll direkt aus dem Code generiert werden
+* *SQLite-Kompatibilität*: Kein separater DB-Server erforderlich
+
+Kandidaten: Python + FastAPI, Kotlin + Ktor, Go + Standard Library.
+
+==== Entscheidung
+
+Option A: *Python 3.12 + FastAPI + SQLModel + Uvicorn + pytest-bdd*
+
+[cols="1,3", options="header"]
+|===
+|Komponente |Rolle
+
+|*Python 3.12*
+|Implementierungssprache. Lesbar, verbreitet, kein Build-Schritt für die Domänenschicht.
+
+|*FastAPI*
+|HTTP-Framework. Generiert OpenAPI/Swagger-Doku automatisch aus Pydantic-Modellen. Routendeklaration direkt an Handler-Funktionen.
+
+|*Pydantic v2*
+|Request-/Response-Validierung. Erzwingt alle Validation-Rules aus `supplementary-validation-rules.adoc` auf Typ-Ebene.
+
+|*SQLModel*
+|ORM = SQLAlchemy + Pydantic in einem Modell. Kein doppeltes Mapping zwischen DB-Schema und API-Schema.
+
+|*SQLite (WAL-Modus)*
+|Primäre Persistenz (gemäß ADR bereits festgelegt). PostgreSQL als Migrationspfad ohne Änderung an der Domänenschicht.
+
+|*Uvicorn*
+|ASGI-Server (eingebettet). Kein externer Webserver erforderlich.
+
+|*uv*
+|Dependency-Management und virtuelle Umgebung. Reproduzierbare Builds via `uv.lock`.
+
+|*pytest + pytest-bdd*
+|Test-Framework. Gherkin-Feature-Files aus den UC-Spezifikationen sind direkt lauffähig.
+
+|*Typer*
+|CLI-Framework. Baut die `leihgut`-CLI als typisierte Kommandogruppen; ruft intern die REST-API auf.
+|===
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option A: Python + FastAPI
+|Option B: Kotlin + Ktor
+|Option C: Go + Stdlib
+
+|Lesbarkeit für Ehrenamtliche
+|{plus}
+|0
+|0
+
+|Automatische OpenAPI-Doku aus Code
+|{plus}
+|{plus}
+|{minus}
+
+|Gherkin-Integration (pytest-bdd)
+|{plus}
+|0
+|{minus}
+
+|Einstiegshürde (kein Build-System)
+|{plus}
+|{minus}
+|0
+
+|Ubiquitous Language im Code (deutsche Bezeichner)
+|{plus}
+|{plus}
+|{plus}
+
+|ORM-Qualität für SQLite
+|{plus}
+|0
+|{minus}
+
+|Typsicherheit zur Laufzeit
+|0
+|{plus}
+|{plus}
+
+|*Gesamt*
+|*+6*
+|*+2*
+|*0*
+|===
+
+_{plus} = Vorteil, 0 = neutral, − = Nachteil_
+
+==== Konsequenzen
+
+*Positiv:*
+
+* FastAPI generiert die OpenAPI-Spezifikation aus Pydantic-Modellen — kein manuelles Schreiben und Pflegen einer separaten API-Beschreibung.
+* `pytest-bdd` liest die Gherkin-Feature-Files aus den UC-Specs direkt; kein Übersetzungsaufwand.
+* SQLModel vermeidet das Doppel-Modell-Problem (DB-Entity vs. API-Schema); ein Klassenbaum genügt.
+* `uv` garantiert reproduzierbare Builds; `requirements.lock` ist versionierbar.
+
+*Negativ:*
+
+* Python ist dynamisch typisiert; Typen werden erst zur Laufzeit von Pydantic geprüft, nicht vom Compiler.
+  Mitigierung: Strikte Pydantic-Modelle + `mypy` im CI.
+* Uvicorn ist ein ASGI-Server, kein Production-Grade-Reverse-Proxy. Bei zukünftigem Netzwerkbetrieb (mehrere Tablets) ist ein vorgelagerter nginx empfohlen.
+
+==== Querverweise
+
+* ADR-001: REST-API only — FastAPI erfüllt diese Entscheidung direkt.
+* ADR-007: Einzelprozess — Uvicorn ist ein eingebetteter Server, kein externer Prozess.
+* `supplementary-interface-contract.adoc` — OpenAPI-Endpunkte werden aus FastAPI-Routen generiert.
+* `supplementary-validation-rules.adoc` — Pydantic-Modelle implementieren die dort definierten Regeln.
+
 
 
 
