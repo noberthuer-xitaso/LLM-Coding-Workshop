@@ -548,6 +548,19 @@ Funktionalität: UC-01 Gegenstand ausleihen
     Wenn ein Mitglied POST /ausleihen sendet mit X-Role "mitglied"
     Dann antwortet das System mit HTTP 403
       Und der Fehlercode lautet "ROLLE_UNZULAESSIG"
+
+  # Sperrende (BR-36) ───────────────────────────────────────────────────────────
+
+  Szenario: Mitglied nach Sperrende wieder ausleihberechtigt (BR-36)
+    Gegeben sei Mitglied "M-0815" hatte eine überfällige Ausleihe
+      Und für diese Ausleihe wurde das Prüfprotokoll abgeschlossen (UC-04)
+      Und Mitglied "M-0815" hat keine weiteren überfälligen Ausleihen
+      Und Mitglied "M-0815" ist nicht gesperrt (BR-36)
+      Und Gegenstand "INV-00042" ist verfügbar und nicht einweisungspflichtig
+      Und Mitglied "M-0815" hat 0 aktive Ausleihen
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00042" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 201
+      Und die Ausleihe ist angelegt
 ----
 
 ---

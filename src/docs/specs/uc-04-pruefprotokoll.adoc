@@ -657,6 +657,39 @@ Feature: UC-04 Prüfprotokoll erstellen
       mit Header X-Role: theke
     Then antwortet das System mit HTTP 403
     And der Response enthält Fehlercode "ROLLE_NICHT_ERLAUBT"
+
+  # -------------------------------------------------------------------
+  # Szenario 10: Sperre endet nach letztem Prüfprotokoll (BR-36)
+  # -------------------------------------------------------------------
+  Scenario: [UC-04 / BR-36] Sperre endet wenn das letzte überfällige Prüfprotokoll abgeschlossen wird
+    Given Mitglied "mitglied-anna-001" hat genau eine überfällige Ausleihe "ausleihe-overdue-99"
+    And Gegenstand "g-overdue-99" befindet sich in Zustand "in_Prüfung"
+    And Mitglied "mitglied-anna-001" ist gesperrt
+    When Rolf POST /ausleihen/ausleihe-overdue-99/pruefprotokoll aufruft
+      """
+      {
+        "nachzustand": "verfügbar",
+        "kautionsabzug": 0
+      }
+      """
+      mit Header X-Role: wart
+    Then antwortet das System mit HTTP 201
+    And Mitglied "mitglied-anna-001" ist nicht mehr gesperrt
+
+  Scenario: [UC-04 / BR-36] Sperre bleibt wenn noch weitere überfällige Ausleihen offen sind
+    Given Mitglied "mitglied-anna-001" hat zwei überfällige Ausleihen "ausleihe-overdue-99" und "ausleihe-overdue-100"
+    And Gegenstand "g-overdue-99" befindet sich in Zustand "in_Prüfung"
+    And Mitglied "mitglied-anna-001" ist gesperrt
+    When Rolf POST /ausleihen/ausleihe-overdue-99/pruefprotokoll aufruft
+      """
+      {
+        "nachzustand": "verfügbar",
+        "kautionsabzug": 0
+      }
+      """
+      mit Header X-Role: wart
+    Then antwortet das System mit HTTP 201
+    And Mitglied "mitglied-anna-001" ist weiterhin gesperrt
 ----
 
 == EARS-Anforderungen
@@ -770,4 +803,10 @@ Feature: UC-04 Prüfprotokoll erstellen
 
 |EARS-UC04-23
 |*[Event-driven]* Wenn das System ein Prüfprotokoll erfolgreich persistiert hat, soll es mit HTTP 201 und einem Response-Body antworten, der mindestens `pruefprotokoll_id`, `nachzustand_eingabe`, `nachzustand_effektiv`, `kautionsabzug` und `kaution_freigegeben` enthält.
+
+|EARS-UC04-24
+|*[Event-driven / BR-36]* Wenn das System ein Prüfprotokoll für eine Ausleihe eines gesperrten Mitglieds abschließt und danach keine weiteren überfälligen Ausleihen dieses Mitglieds mehr existieren, soll das System den Sperrstatus des Mitglieds auf „nicht gesperrt" setzen.
+
+|EARS-UC04-25
+|*[State-driven / BR-36]* Solange ein Mitglied noch mindestens eine Ausleihe im Status „aktiv" mit überschrittener Rückgabefrist hat, soll das System den Sperrstatus dieses Mitglieds als „gesperrt" behandeln — unabhängig davon, wie viele andere Ausleihen bereits abgeschlossen wurden.
 |===

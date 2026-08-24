@@ -1,0 +1,552 @@
+= Supplementary Specification: Entity Model und Zustandsautomaten — Leihgut
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+== Zweck
+
+Dieses Dokument beschreibt das fachliche Datenmodell und die Zustandsautomaten des Systems _Leihgut_.
+Es ergänzt das PRD und den Geschäftsregelkatalog um eine präzise, maschinenlesbar referenzierbare Darstellung aller Domänenentitäten, ihrer Attribute, Beziehungen und erlaubten Zustandsübergänge.
+
+Zweck ist die Grundlage für Implementierung, Datenbankschema, automatisierte Tests und Code-Reviews.
+Alle Bezeichner folgen dem Glossar des PRD.
+BR-IDs verweisen auf den Geschäftsregelkatalog `business-rules.adoc`.
+UC-IDs verweisen auf die Use-Case-Spezifikationen.
+
+== Entity Model
+
+Das folgende PlantUML-Klassendiagramm zeigt alle Domänenentitäten mit Attributen (inklusive Typ, Kardinalität und Constraints) sowie die Beziehungen zwischen den Entitäten.
+
+[plantuml, entity-model, svg]
+....
+@startuml Leihgut_Entity_Model
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classFontName Arial
+skinparam ArrowColor #444444
+skinparam ClassBorderColor #666666
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+hide empty methods
+
+' ─────────────────────────────────────────────
+'  Enumerationen
+' ─────────────────────────────────────────────
+
+enum GegenstandZustand {
+  verfügbar
+  ausgeliehen
+  in_Prüfung
+  reserviert
+  wartungsfällig
+  ausgemustert
+}
+
+enum AusleiheStatus {
+  aktiv
+  in_Prüfung
+  abgeschlossen
+}
+
+enum PruefprotokollNachzustand {
+  verfügbar
+  wartungsfällig
+  ausgemustert
+  verloren
+}
+
+enum KautionsbewegungArt {
+  hinterlegung
+  abzug
+  freigabe
+}
+
+enum ReservierungStatus {
+  aktiv
+  abgeholt
+  verfallen
+  übersprungen
+}
+
+enum VormerkungStatus {
+  aktiv
+  storniert
+}
+
+' ─────────────────────────────────────────────
+'  Entitäten
+' ─────────────────────────────────────────────
+
+class Kategorie {
+  + id : UUID
+  --
+  + name : String
+  + leihdauer_tage : Int {> 0}
+  + wartungsintervall_ausleihen : Int {> 0}
+  + einweisungspflichtig : Boolean
+}
+note right of Kategorie
+  BR-02: Kategorie bestimmt
+  Leihdauer, Wartungsintervall,
+  Einweisungspflicht.
+end note
+
+class Gegenstand {
+  + inventarnummer : String {eindeutig}
+  --
+  + wiederbeschaffungswert_euro : Int {> 0}
+  + zustand : GegenstandZustand
+  + nutzungszaehler : Int {≥ 0}
+}
+note right of Gegenstand
+  BR-01: inventarnummer eindeutig.
+  BR-03: wiederbeschaffungswert_euro > 0.
+  BR-23: nutzungszaehler ≥ 0.
+end note
+
+class Mitglied {
+  + id : UUID
+  --
+  + name : String
+  + gesperrt : Boolean {abgeleitet}
+}
+note right of Mitglied
+  BR-34/BR-35: gesperrt = true
+  wenn mind. eine Ausleihe überfällig.
+  BR-36: gesperrt = false
+  wenn alle überfälligen Ausleihen
+  Prüfprotokoll haben.
+end note
+
+class Einweisung {
+  + id : UUID
+  --
+  + datum : Date
+  + dokumentiert_von : String
+}
+note right of Einweisung
+  BR-08: Pflicht für
+  einweisungspflichtige Kategorien.
+  dokumentiert_von = Wart-ID.
+end note
+
+class Ausleihe {
+  + id : UUID
+  --
+  + ausgabe_datum : Date
+  + rueckgabefrist : Date
+  + rueckgabe_datum : Date {nullable}
+  + auffaelligkeiten : String {nullable}
+  + verlaengert : Boolean
+  + kaution_betrag_euro : Int {> 0, unveränderlich}
+  + status : AusleiheStatus
+}
+note right of Ausleihe
+  BR-09: rueckgabefrist =
+    ausgabe_datum + leihdauer_tage.
+  BR-04: kaution_betrag_euro =
+    round(wbw * 0.20), min 5, max 100.
+  BR-10: verlaengert einmalig möglich.
+  BR-13: auffaelligkeiten Freitext.
+end note
+
+class Pruefprotokoll {
+  + id : UUID
+  --
+  + wart_id : String
+  + zeitstempel : DateTime
+  + nachzustand : PruefprotokollNachzustand
+  + kautionsabzug_euro : Int {≥ 0}
+  + begruendung : String {nullable}
+  + vorschaden_pruefprotokoll_id : UUID {nullable}
+}
+note right of Pruefprotokoll
+  BR-18: Pflichtfelder explizit gesetzt.
+  BR-16: vorschaden_pruefprotokoll_id
+    referenziert früheres Protokoll
+    desselben Gegenstands.
+  BR-19: Verloren ohne Rückgabe möglich;
+    ausleihe_id trotzdem gesetzt.
+  BR-21: kautionsabzug_euro ≤
+    ausleihe.kaution_betrag_euro.
+end note
+
+class Kautionsbewegung {
+  + id : UUID
+  --
+  + zeitstempel : DateTime
+  + art : KautionsbewegungArt
+  + betrag_euro : Int {> 0}
+}
+note right of Kautionsbewegung
+  BR-22: jede Bewegung erzeugt
+  Audit-Eintrag.
+  pruefprotokoll_id = null
+  bei Hinterlegung.
+end note
+
+class Vormerkung {
+  + id : UUID
+  --
+  + eingang_zeitstempel : DateTime
+  + status : VormerkungStatus
+}
+note right of Vormerkung
+  BR-27: gilt für Kategorie.
+  BR-28: max. 1 je Mitglied/Kategorie.
+  BR-29: FIFO-Warteschlange.
+end note
+
+class Reservierung {
+  + id : UUID
+  --
+  + entstehung_datum : Date
+  + verfall_datum : Date
+  + status : ReservierungStatus
+}
+note right of Reservierung
+  BR-31: verfall_datum =
+    entstehung_datum + 3 Kalendertage.
+  BR-33: gesperrtes Mitglied →
+    status = übersprungen,
+    Platz bleibt erhalten.
+end note
+
+' ─────────────────────────────────────────────
+'  Beziehungen
+' ─────────────────────────────────────────────
+
+Kategorie "1" <-- "0..*" Gegenstand : kategorie_id
+Kategorie "1" <-- "0..*" Einweisung : kategorie_id
+Kategorie "1" <-- "0..*" Vormerkung  : kategorie_id
+
+Mitglied "1" <-- "0..*" Einweisung   : mitglied_id
+Mitglied "1" <-- "0..*" Ausleihe     : mitglied_id
+Mitglied "1" <-- "0..*" Vormerkung   : mitglied_id
+
+Gegenstand "1" <-- "0..*" Ausleihe   : gegenstand_id
+Gegenstand "1" <-- "0..*" Reservierung : gegenstand_id
+
+Ausleihe "1" <-- "0..*" Pruefprotokoll    : ausleihe_id
+Ausleihe "1" <-- "0..*" Kautionsbewegung  : ausleihe_id
+
+Pruefprotokoll "0..1" <-- "0..*" Kautionsbewegung : pruefprotokoll_id
+
+Vormerkung "1" <-- "0..*" Reservierung : vormerkung_id
+
+Gegenstand "1" -[hidden]- GegenstandZustand
+Ausleihe   "1" -[hidden]- AusleiheStatus
+
+@enduml
+....
+
+== Zustandsautomat: Gegenstand.zustand
+
+Jeder Gegenstand befindet sich zu jedem Zeitpunkt in genau einem der sechs Zustände.
+`ausgemustert` ist ein Endzustand.
+
+[plantuml, zustand-gegenstand, svg]
+....
+@startuml Zustand_Gegenstand
+
+skinparam StateFontSize 13
+skinparam StateBackgroundColor #E3F2FD
+skinparam StateBorderColor #1565C0
+skinparam ArrowColor #333333
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+
+[*] --> verfügbar : Katalogaufnahme (UC-08)
+
+state verfügbar
+state ausgeliehen
+state in_Prüfung  as "in Prüfung"
+state reserviert
+state wartungsfällig
+state ausgemustert
+
+verfügbar --> ausgeliehen : Ausgabe\n[BR-05, BR-06, BR-07, BR-08]\n(UC-01)
+
+ausgeliehen --> in_Prüfung : Rückgabe an Theke\n[BR-12]\n(UC-03)
+
+ausgeliehen --> ausgemustert : Verloren erklären\n(ohne Rückgabe)\n[BR-19]\n(UC-07)
+
+in_Prüfung --> verfügbar : Prüfprotokoll abgeschlossen\nnachzustand = verfügbar\nkein Wartungsintervall erreicht\nkeine Vormerkung\n[BR-17, BR-24, BR-30]\n(UC-04)
+
+in_Prüfung --> reserviert : Prüfprotokoll abgeschlossen\nnachzustand = verfügbar\nkein Wartungsintervall erreicht\nVormerkung vorhanden\n[BR-17, BR-24, BR-30]\n(UC-04)
+
+in_Prüfung --> wartungsfällig : Prüfprotokoll abgeschlossen\nnachzustand = wartungsfällig\nWartungsintervall erreicht\n[BR-24]\n(UC-04)
+
+in_Prüfung --> ausgemustert : Prüfprotokoll abgeschlossen\nnachzustand = ausgemustert\noder nachzustand = verloren\n[BR-19]\n(UC-04 / UC-07)
+
+reserviert --> ausgeliehen : Ausgabe an reservierendes Mitglied\n[BR-05]\n(UC-01)
+
+reserviert --> verfügbar : Reservierung verfallen\nkeine weitere Vormerkung\n[BR-31]\n(UC-05)
+
+reserviert --> reserviert : Reservierung verfallen\nnächste Vormerkung vorhanden\n[BR-31, BR-33]\n(UC-05)
+
+wartungsfällig --> verfügbar : Wartung abgeschlossen\nkeine Vormerkung\n[BR-25, BR-26]\n(UC-06)
+
+wartungsfällig --> reserviert : Wartung abgeschlossen\nVormerkung vorhanden\n[BR-25, BR-30]\n(UC-06)
+
+ausgemustert --> [*]
+
+@enduml
+....
+
+=== Tabellarische Übersicht der Übergänge
+
+[cols="2,2,2,3,2", options="header"]
+|===
+|Von |Nach |Auslöser |Bedingung |Referenz
+
+|verfügbar |ausgeliehen |Ausgabe |BR-05, BR-06, BR-07, BR-08 erfüllt |UC-01
+|ausgeliehen |in Prüfung |Rückgabe an Theke |— |UC-03, BR-12
+|ausgeliehen |ausgemustert |Verloren erklären |Ohne körperliche Rückgabe |UC-07, BR-19
+|in Prüfung |verfügbar |Prüfprotokoll |nachzustand=verfügbar; kein Wartungsintervall; keine Vormerkung |UC-04, BR-17, BR-24, BR-30
+|in Prüfung |reserviert |Prüfprotokoll |nachzustand=verfügbar; kein Wartungsintervall; Vormerkung vorhanden |UC-04, BR-17, BR-24, BR-30
+|in Prüfung |wartungsfällig |Prüfprotokoll |nachzustand=wartungsfällig; Wartungsintervall erreicht |UC-04, BR-24
+|in Prüfung |ausgemustert |Prüfprotokoll |nachzustand=ausgemustert oder verloren |UC-04/UC-07, BR-19
+|reserviert |ausgeliehen |Ausgabe |Ausgabe an reservierendes Mitglied |UC-01, BR-05
+|reserviert |verfügbar |Reservierungsverfall |Keine weitere Vormerkung |BR-31
+|reserviert |reserviert |Reservierungsverfall |Nächste Vormerkung vorhanden |BR-31, BR-33
+|wartungsfällig |verfügbar |Wartung abschließen |Keine Vormerkung |UC-06, BR-25
+|wartungsfällig |reserviert |Wartung abschließen |Vormerkung vorhanden |UC-06, BR-25, BR-30
+|===
+
+== Zustandsautomat: Ausleihe.status
+
+Eine Ausleihe durchläuft die Zustände `aktiv`, optional `in_Prüfung` und endet in `abgeschlossen`.
+`abgeschlossen` ist ein Endzustand.
+
+[plantuml, zustand-ausleihe, svg]
+....
+@startuml Zustand_Ausleihe
+
+skinparam StateFontSize 13
+skinparam StateBackgroundColor #E8F5E9
+skinparam StateBorderColor #2E7D32
+skinparam ArrowColor #333333
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+
+[*] --> aktiv : Ausgabe\n[BR-09]\n(UC-01)
+
+state aktiv
+state in_Prüfung  as "in Prüfung"
+state abgeschlossen
+
+aktiv --> in_Prüfung : Rückgabe an Theke\n[BR-12]\n(UC-03)
+
+aktiv --> abgeschlossen : Verloren erklären\n(ohne Rückgabe)\n[BR-19]\n(UC-07)
+
+note on link
+  Prüfprotokoll mit nachzustand = verloren;
+  Kaution vollständig einbehalten;
+  Gegenstand → ausgemustert.
+end note
+
+in_Prüfung --> abgeschlossen : Prüfprotokoll abgeschlossen\n[BR-15]\n(UC-04)
+
+note on link
+  Kautionsabzug wird festgelegt (BR-21).
+  Nutzungszähler +1 (BR-23).
+  Gegenstand wechselt Zustand (BR-17).
+end note
+
+abgeschlossen --> [*]
+
+@enduml
+....
+
+=== Tabellarische Übersicht der Übergänge
+
+[cols="2,2,2,3,2", options="header"]
+|===
+|Von |Nach |Auslöser |Bedingung |Referenz
+
+|— (neu) |aktiv |Ausgabe |Ausgabebedingungen BR-05–08 erfüllt; Kaution hinterlegt |UC-01, BR-09
+|aktiv |in Prüfung |Rückgabe an Theke |Gegenstand physisch übergeben; Auffälligkeiten optional |UC-03, BR-12, BR-13
+|aktiv |abgeschlossen |Verloren erklären |Kein Rückgabe-Akt; Prüfprotokoll nachzustand=verloren; Kaution vollständig einbehalten |UC-07, BR-19
+|in Prüfung |abgeschlossen |Prüfprotokoll |Wart erstellt Protokoll; Kautionsabzug festgelegt; Nutzungszähler +1 |UC-04, BR-15, BR-21, BR-23
+|===
+
+== Zustandsautomat: Mitglied.gesperrt (abgeleiteter Zustand)
+
+`gesperrt` ist kein unabhängiger persistierter Zustand, sondern ein **abgeleitetes Prädikat**.
+Es wird bei jedem prüfungsrelevanten Ereignis neu bewertet.
+
+[plantuml, zustand-mitglied-sperre, svg]
+....
+@startuml Zustand_Mitglied_Sperre
+
+skinparam StateFontSize 13
+skinparam StateBackgroundColor #FFF3E0
+skinparam StateBorderColor #E65100
+skinparam ArrowColor #333333
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+
+[*] --> nicht_gesperrt : Mitglied angelegt
+
+state nicht_gesperrt as "gesperrt = false"
+state gesperrt       as "gesperrt = true"
+
+nicht_gesperrt --> gesperrt : Ausleihe wird überfällig\n(rueckgabefrist < heute\nUND rueckgabe_datum IS NULL)\n[BR-34, BR-35]
+
+gesperrt --> nicht_gesperrt : Alle überfälligen Ausleihen\nhaben Prüfprotokoll\n[BR-36]
+
+note bottom of nicht_gesperrt
+  Darf ausleihen (wenn weitere
+  Bedingungen erfüllt, BR-05–08).
+  Darf vormerken.
+  Darf abholen.
+end note
+
+note bottom of gesperrt
+  Darf NICHT ausleihen (BR-07).
+  Darf vormerken (BR-33).
+  Darf NICHT abholen.
+  Entstehende Reservierung wird
+  übersprungen; Platz bleibt (BR-33).
+end note
+
+@enduml
+....
+
+=== Tabellarische Übersicht der Übergänge
+
+[cols="2,2,3,2", options="header"]
+|===
+|Von |Nach |Auslöser / Bedingung |Referenz
+
+|gesperrt = false |gesperrt = true |Mind. eine aktive Ausleihe: `rueckgabefrist < heute` AND `rueckgabe_datum IS NULL` |BR-34, BR-35
+|gesperrt = true |gesperrt = false |Alle vormals überfälligen Ausleihen haben ein abgeschlossenes Prüfprotokoll |BR-36
+|===
+
+== Invarianten und Constraints
+
+Dieser Abschnitt listet die unveränderlichen Eigenschaften (Invarianten) und Integritätsbedingungen, die das System zu jedem Zeitpunkt einhalten muss.
+
+=== Katalog-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-01
+|`Gegenstand.inventarnummer` ist eindeutig über alle Gegenstände. (BR-01)
+
+|INV-02
+|Jeder Gegenstand gehört zu genau einer Kategorie. (BR-01)
+
+|INV-03
+|`Kategorie.leihdauer_tage > 0` und `Kategorie.wartungsintervall_ausleihen > 0`. (BR-02)
+
+|INV-04
+|`Gegenstand.wiederbeschaffungswert_euro > 0`. (BR-03)
+
+|INV-05
+|`Gegenstand.nutzungszaehler ≥ 0`. (BR-23)
+|===
+
+=== Ausleihe-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-06
+|`Ausleihe.kaution_betrag_euro` wird bei Ausgabe einmalig berechnet und danach nicht mehr verändert.
+Berechnung: `max(5, min(100, round(wiederbeschaffungswert_euro × 0.20)))`. (BR-04, BR-09)
+
+|INV-07
+|`Ausleihe.rueckgabefrist = Ausleihe.ausgabe_datum + Kategorie.leihdauer_tage`. (BR-09)
+
+|INV-08
+|`Ausleihe.verlaengert = true` kann nur einmal gesetzt werden und nur wenn keine offene Vormerkung für die Kategorie existiert und die Ausleihe nicht überfällig ist. (BR-10, BR-11)
+
+|INV-09
+|Ein Mitglied hat höchstens drei aktive Ausleihen gleichzeitig (Status `aktiv` oder `in_Prüfung`). (BR-06)
+
+|INV-10
+|Pro Mitglied und Kategorie existiert höchstens eine Vormerkung mit `status = aktiv`. (BR-28)
+|===
+
+=== Prüfprotokoll-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-11
+|`Pruefprotokoll.kautionsabzug_euro ≥ 0` und `≤ zugehörige Ausleihe.kaution_betrag_euro`. (BR-21)
+
+|INV-12
+|`Pruefprotokoll.vorschaden_pruefprotokoll_id` verweist ausschließlich auf ein Prüfprotokoll desselben Gegenstands (transitiv: über die verknüpfte Ausleihe ermittelbar). (BR-16)
+
+|INV-13
+|Zu einer Ausleihe mit `status = abgeschlossen` existiert genau ein Prüfprotokoll, außer beim "Verloren erklären" vor Rückgabe — dort gilt BR-19: `ausleihe_id` ist trotzdem gesetzt, auch ohne vorangegangene Rückgabe. (BR-15, BR-19)
+
+|INV-14
+|Der `nachzustand` im Prüfprotokoll wird explizit gesetzt und nicht aus anderen Feldern abgeleitet. (BR-18)
+|===
+
+=== Kautionsbewegung-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-15
+|`Kautionsbewegung.betrag_euro > 0`. (BR-22)
+
+|INV-16
+|Zu jeder Ausleihe existiert genau eine `Kautionsbewegung` mit `art = hinterlegung` und `pruefprotokoll_id IS NULL`. (BR-20)
+
+|INV-17
+|Die Summe aller `abzug`-Bewegungen einer Ausleihe darf `kaution_betrag_euro` der Ausleihe nicht überschreiten. (BR-21)
+
+|INV-18
+|Der Saldo aller Kautionsbewegungen einer abgeschlossenen Ausleihe ergibt null:
+`hinterlegung − abzug − freigabe = 0`. (BR-20, BR-22)
+|===
+
+=== Reservierungs-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-19
+|`Reservierung.verfall_datum = Reservierung.entstehung_datum + 3 Kalendertage`. (BR-31)
+
+|INV-20
+|Pro Gegenstand existiert höchstens eine Reservierung mit `status = aktiv`. (BR-30)
+
+|INV-21
+|Ein Gegenstand im Zustand `wartungsfällig` hat keine aktive Reservierung und keine aktive Ausleihe. (BR-26)
+|===
+
+=== Zustandskonsistenz-Invarianten
+
+[cols="1,4", options="header"]
+|===
+|ID |Invariante
+
+|INV-22
+|Für jeden Gegenstand mit `zustand = ausgeliehen` existiert genau eine Ausleihe mit `status = aktiv`. (Zustandsautomat Gegenstand / Ausleihe)
+
+|INV-23
+|Für jeden Gegenstand mit `zustand = in_Prüfung` existiert genau eine Ausleihe mit `status = in_Prüfung`. (Zustandsautomat)
+
+|INV-24
+|Für jeden Gegenstand mit `zustand = reserviert` existiert genau eine Reservierung mit `status = aktiv`. (Zustandsautomat)
+
+|INV-25
+|`ausgemustert` ist ein Endzustand: Ein Gegenstand mit `zustand = ausgemustert` hat keine aktiven Ausleihen und keine aktiven Reservierungen. (Zustandsautomat)
+|===

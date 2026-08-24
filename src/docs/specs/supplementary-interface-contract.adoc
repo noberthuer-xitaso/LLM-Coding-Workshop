@@ -1,0 +1,2483 @@
+= Supplementary Specification: Interface Contract — Leihgut
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+Dieses Dokument ist die normative API-Referenz des Systems *Leihgut*.
+Es fasst alle REST-Endpunkte und CLI-Kommandos in einer Datei zusammen, sodass Entwickler hier nachschlagen können, ohne jede UC-Datei öffnen zu müssen.
+
+Relevante Quelldokumente: `prd.adoc`, `business-rules.adoc`, UC-01 bis UC-08.
+
+---
+
+== Allgemeine Konventionen
+
+=== HTTP-Konventionen
+
+[cols="1,3"]
+|===
+|Konvention |Wert
+
+|Base-Path
+|`/` (kein Versions-Präfix in Release 1)
+
+|Content-Type
+|`application/json` für alle Requests und Responses mit Body
+
+|Zeichencodierung
+|UTF-8
+
+|Datumformat
+|ISO 8601, Datum: `YYYY-MM-DD`, Zeitstempel: `YYYY-MM-DDTHH:MM:SSZ` (UTC)
+
+|Beträge
+|Immer in ganzen Euro (Integer). Keine Dezimalstellen, keine Währungsangabe im Feld.
+
+|IDs
+|UUID v4 als String, außer Inventarnummern und Mitglied-IDs (domänenspezifisches Format, z. B. `INV-00042`, `M-0815`)
+|===
+
+=== Rollen-Header
+
+Der Header `X-Role` gibt die Rolle des Aufrufers an. Er wird *nicht* kryptographisch geprüft (kein Login im System, vgl. PRD — Authentifizierung). Sein Wert ist informativ und steuert die fachliche Zugangskontrolle.
+
+[cols="1,3"]
+|===
+|Wert |Bedeutung
+
+|`thekendienst`
+|Thekendienst (Karim) — gibt Gegenstände aus und nimmt sie zurück
+
+|`mitglied`
+|Mitglied (Sabine) — leiht aus, merkt vor, verlängert
+
+|`wart`
+|Werkstattwart (Rolf) — prüft, wartet, ausmustert, erstellt Prüfprotokolle
+|===
+
+Fehlt der Header oder trägt er einen unbekannten Wert, verhalten sich Endpunkte mit Rollenanforderung wie in den jeweiligen Fehlerfällen beschrieben.
+
+=== Einheitliches Fehlerformat
+
+Alle Fehlerantworten verwenden dasselbe JSON-Schema:
+
+[source,json]
+----
+{
+  "fehler_code": "FEHLER_CODE_ALS_STRING",
+  "beschreibung": "Menschenlesbare Erklärung des Fehlers.",
+  "kontext": {
+    "feld": "optionale Zusatzinformation, z. B. betroffene ID oder ungültiger Wert"
+  }
+}
+----
+
+Das Feld `kontext` ist optional und kann fehlen, wenn kein Zusatzkontext vorliegt.
+
+=== Zustandsmodell Gegenstände
+
+Ein Gegenstand befindet sich zu jedem Zeitpunkt in genau einem der folgenden Zustände:
+
+[cols="1,3"]
+|===
+|Zustand |Bedeutung
+
+|`verfügbar`
+|Kann ausgegeben oder reserviert werden.
+
+|`ausgeliehen`
+|Ausgegeben; Rückgabe steht aus.
+
+|`in_pruefung`
+|An der Theke zurückgegeben; Prüfprotokoll steht aus.
+
+|`reserviert`
+|Einem Mitglied für drei Kalendertage zugeteilt; Ausgabe steht aus.
+
+|`wartungsfaellig`
+|Wartungsintervall erreicht; darf nicht ausgegeben und nicht reserviert werden.
+
+|`ausgemustert`
+|Endzustand; verloren oder irreparabel.
+|===
+
+---
+
+== Ressourcengruppe: Katalog
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,1,2,3"]
+|===
+|Methode |Pfad |Kurzbeschreibung |Actor |UC-Ref |Wichtigste Fehlercodes
+
+|POST
+|`/kategorien`
+|Neue Kategorie anlegen
+|wart
+|UC-08a
+|`EINGABE_UNGUELTIG`, `KATEGORIE_NAME_DOPPELT`, `ROLLE_UNZULAESSIG`
+
+|GET
+|`/kategorien`
+|Alle Kategorien abrufen (optional gefiltert)
+|wart, thekendienst
+|UC-08a
+|`EINGABE_UNGUELTIG`, `ROLLE_UNZULAESSIG`
+
+|GET
+|`/kategorien/{id}`
+|Einzelne Kategorie abrufen
+|wart, thekendienst
+|UC-08a
+|`KATEGORIE_NICHT_GEFUNDEN`, `ROLLE_UNZULAESSIG`
+
+|PUT
+|`/kategorien/{id}`
+|Kategorie aktualisieren
+|wart
+|UC-08a
+|`EINGABE_UNGUELTIG`, `KATEGORIE_NICHT_GEFUNDEN`, `KATEGORIE_NAME_DOPPELT`, `ROLLE_UNZULAESSIG`
+
+|POST
+|`/gegenstaende`
+|Neuen Gegenstand anlegen
+|wart
+|UC-08b
+|`EINGABE_UNGUELTIG`, `INVENTARNUMMER_DOPPELT`, `KATEGORIE_NICHT_GEFUNDEN`, `ROLLE_UNZULAESSIG`
+
+|GET
+|`/gegenstaende`
+|Gegenstände abrufen (mit optionalen Filtern)
+|wart, thekendienst
+|UC-08b
+|`EINGABE_UNGUELTIG`, `ROLLE_UNZULAESSIG`
+
+|GET
+|`/gegenstaende/{inventarnummer}`
+|Einzelnen Gegenstand abrufen
+|wart, thekendienst
+|UC-08b
+|`GEGENSTAND_NICHT_GEFUNDEN`, `ROLLE_UNZULAESSIG`
+
+|PUT
+|`/gegenstaende/{inventarnummer}`
+|Gegenstand aktualisieren (inkl. Ausmusterung; Kategorienwechsel-Regeln beachten)
+|wart
+|UC-08b, Q8
+|`EINGABE_UNGUELTIG`, `GEGENSTAND_NICHT_GEFUNDEN`, `KATEGORIE_NICHT_GEFUNDEN`, `GEGENSTAND_HAT_AKTIVE_AUSLEIHEN`, `KATEGORIENWECHSEL_NICHT_ERLAUBT`, `ROLLE_UNZULAESSIG`
+|===
+
+---
+
+=== POST /kategorien
+
+Legt eine neue Kategorie an. Nur Rolle `wart`.
+
+==== Request
+
+[source,http]
+----
+POST /kategorien HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "name": "Kettensäge",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`name`
+|string
+|ja
+|Eindeutiger Name. Nicht leer, max. 100 Zeichen. (BR-02)
+
+|`leihdauerTage`
+|integer ≥ 1
+|ja
+|Leihdauer in Tagen. (BR-02)
+
+|`wartungsintervallAusleihen`
+|integer ≥ 1
+|ja
+|Anzahl Ausleihen bis zur Wartungsfälligkeit. (BR-02)
+
+|`einweisungspflichtig`
+|boolean
+|ja
+|`true` wenn Einweisung erforderlich. (BR-02)
+|===
+
+==== Response 201 Created
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00005",
+  "name": "Kettensäge",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt, Typ falsch oder Wert außerhalb des erlaubten Bereichs
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|409
+|`KATEGORIE_NAME_DOPPELT`
+|Eine Kategorie mit diesem Namen existiert bereits
+|===
+
+---
+
+=== GET /kategorien
+
+Liefert alle Kategorien. Rollen `wart` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /kategorien HTTP/1.1
+X-Role: thekendienst
+----
+
+Optionaler Query-Parameter:
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`einweisungspflichtig`
+|boolean
+|nein
+|Filtert auf Kategorien mit (`true`) oder ohne (`false`) Einweisungspflicht
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+[
+  {
+    "kategorieId": "KAT-00001",
+    "name": "Bohrhammer",
+    "leihdauerTage": 14,
+    "wartungsintervallAusleihen": 20,
+    "einweisungspflichtig": false
+  },
+  {
+    "kategorieId": "KAT-00005",
+    "name": "Kettensäge",
+    "leihdauerTage": 7,
+    "wartungsintervallAusleihen": 10,
+    "einweisungspflichtig": true
+  }
+]
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Ungültiger Wert für `einweisungspflichtig`
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart` oder `thekendienst`
+|===
+
+---
+
+=== GET /kategorien/{id}
+
+Liefert eine einzelne Kategorie. Rollen `wart` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /kategorien/KAT-00001 HTTP/1.1
+X-Role: thekendienst
+----
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00001",
+  "name": "Bohrhammer",
+  "leihdauerTage": 14,
+  "wartungsintervallAusleihen": 20,
+  "einweisungspflichtig": false
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht erlaubt
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Datensatz mit dieser ID
+|===
+
+---
+
+=== PUT /kategorien/{id}
+
+Aktualisiert eine bestehende Kategorie vollständig (alle Felder Pflicht). Nur Rolle `wart`.
+
+NOTE: Eine Änderung von `leihdauerTage` betrifft ausschließlich neue Ausleihen. Laufende Ausleihen behalten ihre ursprüngliche Rückgabefrist.
+
+==== Request
+
+[source,http]
+----
+PUT /kategorien/KAT-00005 HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "name": "Kettensäge",
+  "leihdauerTage": 10,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+Body-Felder identisch mit `POST /kategorien`.
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00005",
+  "name": "Kettensäge",
+  "leihdauerTage": 10,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt oder ungültiger Wert
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Datensatz mit dieser ID
+
+|409
+|`KATEGORIE_NAME_DOPPELT`
+|Eine andere Kategorie trägt bereits diesen Namen
+|===
+
+---
+
+=== POST /gegenstaende
+
+Legt einen neuen Gegenstand an. Anfangszustand immer `verfügbar`, Nutzungszähler `0`. Nur Rolle `wart`.
+
+==== Request
+
+[source,http]
+----
+POST /gegenstaende HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 200
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`inventarnummer`
+|string
+|ja
+|Systemweit eindeutige Inventarnummer. Nicht leer, max. 50 Zeichen. (BR-01)
+
+|`kategorieId`
+|string
+|ja
+|ID der zugeordneten Kategorie. Muss im System existieren. (BR-01, BR-02)
+
+|`wiederbeschaffungswert`
+|integer ≥ 1
+|ja
+|Wiederbeschaffungswert in ganzen Euro. (BR-03)
+|===
+
+==== Response 201 Created
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "kategorieName": "Bohrhammer",
+  "wiederbeschaffungswert": 200,
+  "kaution": 40,
+  "zustand": "verfügbar",
+  "nutzungszaehler": 0
+}
+----
+
+Das Feld `kaution` ist ein berechnetes Feld (BR-04: 20 % des Wiederbeschaffungswerts, kaufmännisch gerundet, min. 5 €, max. 100 €). Es wird nicht persistiert.
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt oder ungültiger Wert
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kategorie-ID existiert nicht
+
+|409
+|`INVENTARNUMMER_DOPPELT`
+|Gegenstand mit dieser Inventarnummer existiert bereits (BR-01)
+|===
+
+---
+
+=== GET /gegenstaende
+
+Liefert alle Gegenstände, mit optionalen Filtern und berechneter Kaution. Rollen `wart` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /gegenstaende?kategorieId=KAT-00001&zustand=verfügbar HTTP/1.1
+X-Role: thekendienst
+----
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`kategorieId`
+|string
+|nein
+|Filtert auf Gegenstände einer bestimmten Kategorie
+
+|`zustand`
+|string (Enum)
+|nein
+|Filtert auf einen Zustand: `verfügbar` \| `ausgeliehen` \| `in_pruefung` \| `reserviert` \| `wartungsfaellig` \| `ausgemustert`
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+[
+  {
+    "inventarnummer": "INV-00042",
+    "kategorieId": "KAT-00001",
+    "kategorieName": "Bohrhammer",
+    "wiederbeschaffungswert": 200,
+    "kaution": 40,
+    "zustand": "verfügbar",
+    "nutzungszaehler": 3
+  }
+]
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Ungültiger Zustandswert im Filter
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht erlaubt
+|===
+
+---
+
+=== GET /gegenstaende/{inventarnummer}
+
+Liefert einen einzelnen Gegenstand inkl. berechneter Kaution. Rollen `wart` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /gegenstaende/INV-00042 HTTP/1.1
+X-Role: thekendienst
+----
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "kategorieName": "Bohrhammer",
+  "wiederbeschaffungswert": 200,
+  "kaution": 40,
+  "zustand": "verfügbar",
+  "nutzungszaehler": 3
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht erlaubt
+
+|404
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+|===
+
+---
+
+=== PUT /gegenstaende/{inventarnummer}
+
+Aktualisiert Wiederbeschaffungswert und Kategorie eines Gegenstands. Ermöglicht außerdem die Ausmusterung. Nur Rolle `wart`.
+
+==== Klärung Q8 — Kategorienwechsel
+
+Ein Kategorienwechsel (Änderung von `kategorieId`) ist nur erlaubt, wenn der Gegenstand im Zustand `verfügbar` oder `wartungsfaellig` ist.
+Bei einem Kategorienwechsel wird der `nutzungszaehler` automatisch auf `0` zurückgesetzt.
+
+*Fehler 422 `KATEGORIENWECHSEL_NICHT_ERLAUBT`*, wenn Kategorienwechsel versucht wird und Gegenstand im Zustand `ausgeliehen`, `in_pruefung` oder `reserviert` ist.
+
+==== Request
+
+[source,http]
+----
+PUT /gegenstaende/INV-00042 HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 220
+}
+----
+
+Für Ausmusterung:
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 220,
+  "zustand": "ausgemustert"
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`kategorieId`
+|string
+|ja
+|ID der zugeordneten Kategorie. Muss im System existieren. Kategorienwechsel nur bei Zustand `verfügbar` oder `wartungsfaellig` (Q8).
+
+|`wiederbeschaffungswert`
+|integer ≥ 1
+|ja
+|Wiederbeschaffungswert in ganzen Euro. (BR-03)
+
+|`zustand`
+|string
+|nein
+|Nur der Wert `ausgemustert` ist erlaubt. Alle anderen Zustandsübergänge erfolgen über dedizierte Endpunkte.
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "kategorieName": "Bohrhammer",
+  "wiederbeschaffungswert": 220,
+  "kaution": 44,
+  "zustand": "verfügbar",
+  "nutzungszaehler": 3
+}
+----
+
+Bei Kategorienwechsel: `nutzungszaehler` ist `0` in der Response.
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Ungültiger Feldwert oder unerlaubter `zustand`-Wert
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|404
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Kategorie-Datensatz mit der angegebenen ID
+
+|422
+|`GEGENSTAND_HAT_AKTIVE_AUSLEIHEN`
+|Ausmusterung nicht möglich: Gegenstand ist `ausgeliehen` oder `in_pruefung`
+
+|422
+|`KATEGORIENWECHSEL_NICHT_ERLAUBT`
+|Kategorienwechsel nicht möglich: Gegenstand ist `ausgeliehen`, `in_pruefung` oder `reserviert` (Q8)
+|===
+
+---
+
+== Ressourcengruppe: Einweisung
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,1,2,3"]
+|===
+|Methode |Pfad |Kurzbeschreibung |Actor |UC-Ref |Wichtigste Fehlercodes
+
+|POST
+|`/einweisungen`
+|Einweisung dokumentieren
+|wart
+|BR-08
+|`EINGABE_UNGUELTIG`, `MITGLIED_NICHT_GEFUNDEN`, `KATEGORIE_NICHT_GEFUNDEN`, `EINWEISUNG_BEREITS_VORHANDEN`, `ROLLE_UNZULAESSIG`
+
+|GET
+|`/einweisungen`
+|Einweisungen abfragen (nach Mitglied und/oder Kategorie)
+|wart, thekendienst
+|BR-08
+|`EINGABE_UNGUELTIG`, `ROLLE_UNZULAESSIG`
+
+|DELETE
+|`/einweisungen/{id}`
+|Einweisung entfernen
+|wart
+|BR-08
+|`EINWEISUNG_NICHT_GEFUNDEN`, `ROLLE_UNZULAESSIG`
+|===
+
+---
+
+=== POST /einweisungen
+
+Dokumentiert eine durchgeführte Einweisung für ein Mitglied in einer bestimmten Kategorie. Dies ist die Voraussetzung für die Ausleihe einweisungspflichtiger Gegenstände (BR-08). Nur Rolle `wart`.
+
+==== CLI-Äquivalent
+
+[source,shell]
+----
+leihgut einweisung dokumentieren --mitglied-id <id> --kategorie-id <id>
+----
+
+==== Request
+
+[source,http]
+----
+POST /einweisungen HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "mitglied_id": "M-0815",
+  "kategorie_id": "KAT-00005"
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|string
+|ja
+|ID des Mitglieds, das eingewiesen wurde
+
+|`kategorie_id`
+|string
+|ja
+|ID der Kategorie, für die die Einweisung gilt
+|===
+
+==== Response 201 Created
+
+[source,json]
+----
+{
+  "einweisung_id": "EW-00034",
+  "mitglied_id": "M-0815",
+  "kategorie_id": "KAT-00005",
+  "kategorie_name": "Kettensäge",
+  "dokumentiert_am": "2026-08-24T10:00:00Z",
+  "wart_id": "wart-rolf"
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt oder ungültiger Wert
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|404
+|`MITGLIED_NICHT_GEFUNDEN`
+|`mitglied_id` existiert nicht
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|`kategorie_id` existiert nicht
+
+|409
+|`EINWEISUNG_BEREITS_VORHANDEN`
+|Für dieses Mitglied in dieser Kategorie ist bereits eine Einweisung dokumentiert
+|===
+
+---
+
+=== GET /einweisungen
+
+Fragt dokumentierte Einweisungen ab. Mindestens ein Filterparameter ist anzugeben. Rollen `wart` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /einweisungen?mitglied_id=M-0815&kategorie_id=KAT-00005 HTTP/1.1
+X-Role: thekendienst
+----
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|string
+|nein*
+|Filtert auf Einweisungen eines bestimmten Mitglieds
+
+|`kategorie_id`
+|string
+|nein*
+|Filtert auf Einweisungen einer bestimmten Kategorie
+|===
+
+_*Mindestens einer der beiden Parameter muss angegeben werden._
+
+==== Response 200 OK
+
+[source,json]
+----
+[
+  {
+    "einweisung_id": "EW-00034",
+    "mitglied_id": "M-0815",
+    "kategorie_id": "KAT-00005",
+    "kategorie_name": "Kettensäge",
+    "dokumentiert_am": "2026-08-24T10:00:00Z"
+  }
+]
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Keiner der Filterparameter angegeben
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht erlaubt
+|===
+
+---
+
+=== DELETE /einweisungen/{id}
+
+Entfernt eine dokumentierte Einweisung. Nur Rolle `wart`.
+
+==== Request
+
+[source,http]
+----
+DELETE /einweisungen/EW-00034 HTTP/1.1
+X-Role: wart
+----
+
+==== Response 204 No Content
+
+Kein Antwort-Body.
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `wart`
+
+|404
+|`EINWEISUNG_NICHT_GEFUNDEN`
+|`id` existiert nicht
+|===
+
+---
+
+== Ressourcengruppe: Ausleihe
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,1,2,3"]
+|===
+|Methode |Pfad |Kurzbeschreibung |Actor |UC-Ref |Wichtigste Fehlercodes
+
+|POST
+|`/ausleihen`
+|Ausleihe anlegen (Ausgabe)
+|thekendienst
+|UC-01
+|`MITGLIED_GESPERRT`, `AUSLEIHLIMIT_ERREICHT`, `GEGENSTAND_NICHT_VERFUEGBAR`, `GEGENSTAND_WARTUNGSFAELLIG`, `EINWEISUNG_FEHLT`
+
+|GET
+|`/ausleihen/{id}`
+|Ausleihe abrufen
+|thekendienst, wart
+|UC-01
+|`AUSLEIHE_NICHT_GEFUNDEN`
+
+|POST
+|`/ausleihen/{id}/verlaengerung`
+|Ausleihe verlängern
+|thekendienst, mitglied
+|UC-02
+|`BEREITS_VERLAENGERT`, `AUSLEIHE_UEBERFAELLIG`, `VORMERKUNG_OFFEN`
+
+|POST
+|`/ausleihen/{id}/rueckgabe`
+|Gegenstand zurücknehmen
+|thekendienst
+|UC-03
+|`GEGENSTAND_BEREITS_ZURUECKGEGEBEN`
+
+|POST
+|`/ausleihen/{id}/pruefprotokoll`
+|Prüfprotokoll erstellen (schließt Ausleihe ab)
+|wart
+|UC-04
+|`GEGENSTAND_NICHT_IN_PRUEFUNG`, `KAUTIONSABZUG_ZU_HOCH`, `NACHZUSTAND_UNGUELTIG`
+
+|POST
+|`/ausleihen/{id}/verloren`
+|Gegenstand als verloren erklären (ohne Rückgabe)
+|wart
+|UC-07
+|`AUSLEIHE_BEREITS_ABGESCHLOSSEN`, `GEGENSTAND_IN_PRUEFUNG`, `GEGENSTAND_BEREITS_AUSGEMUSTERT`
+|===
+
+---
+
+=== POST /ausleihen
+
+Löst die Ausgabe eines Gegenstands an ein Mitglied aus. Legt die Ausleihe an, hinterlegt die Kaution und versetzt den Gegenstand in den Zustand `ausgeliehen`. Nur Rolle `thekendienst`.
+
+==== Klärung Q9 — Checkout bei Reservierung
+
+Ist der Gegenstand im Zustand `reserviert` *für dieses Mitglied*, akzeptiert das System ihn automatisch als ausgabefähig (BR-05). Die Reservierung wird bei der Ausgabe gelöscht. Es ist kein separater Endpunkt erforderlich.
+
+Ist der Gegenstand für ein *anderes* Mitglied reserviert, schlägt die Ausgabe mit `GEGENSTAND_NICHT_VERFUEGBAR` fehl.
+
+==== Prüfreihenfolge
+
+. Mitglied gesperrt? (BR-07) → `MITGLIED_GESPERRT`
+. Aktive Ausleihen ≥ 3? (BR-06) → `AUSLEIHLIMIT_ERREICHT`
+. Gegenstand wartungsfällig? (BR-26) → `GEGENSTAND_WARTUNGSFAELLIG`
+. Gegenstand verfügbar oder reserviert für dieses Mitglied? (BR-05) → `GEGENSTAND_NICHT_VERFUEGBAR`
+. Einweisung vorhanden (falls einweisungspflichtig)? (BR-08) → `EINWEISUNG_FEHLT`
+
+==== Request
+
+[source,http]
+----
+POST /ausleihen HTTP/1.1
+Content-Type: application/json
+X-Role: thekendienst
+
+{
+  "gegenstandId": "INV-00042",
+  "mitgliedId": "M-0815"
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`gegenstandId`
+|string
+|ja
+|Inventarnummer des auszugebenden Gegenstands
+
+|`mitgliedId`
+|string
+|ja
+|Mitgliedsnummer des ausleihenden Mitglieds
+
+|`ausgabedatum`
+|string (ISO 8601)
+|nein
+|Ausgabedatum; fehlt es, verwendet das System die austauschbare Datumsquelle (BR-09). Darf nicht in der Zukunft liegen.
+|===
+
+==== Response 201 Created
+
+[source,json]
+----
+{
+  "ausleiheId": "AL-20260824-00099",
+  "gegenstandId": "INV-00042",
+  "mitgliedId": "M-0815",
+  "ausgabedatum": "2026-08-24",
+  "rueckgabefrist": "2026-09-07",
+  "kautionsbetrag": 40,
+  "kautionsAuditId": "AUD-20260824-00301",
+  "gegenstandZustand": "ausgeliehen",
+  "leihdauerTage": 14
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNVOLLSTAENDIG`
+|`gegenstandId` oder `mitgliedId` fehlt oder ist leer
+
+|400
+|`UNGÜLTIGES_DATUM`
+|`ausgabedatum` ist kein gültiges ISO-8601-Datum oder liegt in der Zukunft
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `thekendienst`
+
+|404
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+
+|404
+|`MITGLIED_NICHT_GEFUNDEN`
+|Kein Mitglied mit dieser Mitgliedsnummer
+
+|422
+|`MITGLIED_GESPERRT`
+|Mitglied hat mindestens eine überfällige Ausleihe (BR-07, BR-34, BR-35)
+
+|422
+|`AUSLEIHLIMIT_ERREICHT`
+|Mitglied führt bereits 3 aktive Ausleihen (BR-06)
+
+|422
+|`GEGENSTAND_WARTUNGSFAELLIG`
+|Gegenstand ist wartungsfällig (BR-26)
+
+|422
+|`GEGENSTAND_NICHT_VERFUEGBAR`
+|Gegenstand ist weder `verfügbar` noch für dieses Mitglied `reserviert` (BR-05)
+
+|422
+|`EINWEISUNG_FEHLT`
+|Kategorie ist einweisungspflichtig; Mitglied hat keine dokumentierte Einweisung (BR-08)
+|===
+
+---
+
+=== GET /ausleihen/{id}
+
+Liefert den aktuellen Stand einer Ausleihe. Rollen `thekendienst` und `wart`.
+
+==== Request
+
+[source,http]
+----
+GET /ausleihen/AL-20260824-00099 HTTP/1.1
+X-Role: thekendienst
+----
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleiheId": "AL-20260824-00099",
+  "gegenstandId": "INV-00042",
+  "mitgliedId": "M-0815",
+  "ausgabedatum": "2026-08-24",
+  "rueckgabefrist": "2026-09-07",
+  "kautionsbetrag": 40,
+  "verlaengert": false,
+  "status": "aktiv",
+  "auffaelligkeiten": null,
+  "zeitstempelRueckgabe": null
+}
+----
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|`status`
+|`aktiv` (Gegenstand ausgeliehen oder in Prüfung) \| `abgeschlossen` (Prüfprotokoll liegt vor)
+
+|`auffaelligkeiten`
+|Freitextnotiz der Theke bei Rückgabe (BR-13); `null` wenn nicht erfasst
+
+|`zeitstempelRueckgabe`
+|ISO-8601-Zeitstempel der körperlichen Rückgabe (UC-03); `null` solange nicht zurückgegeben
+|===
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht erlaubt
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Keine Ausleihe mit dieser ID
+|===
+
+---
+
+=== POST /ausleihen/{id}/verlaengerung
+
+Verlängert die Rückgabefrist einer aktiven Ausleihe einmalig um die volle Leihdauer der Kategorie. Rollen `thekendienst` und `mitglied`. Kein Request-Body erforderlich.
+
+==== Request
+
+[source,http]
+----
+POST /ausleihen/AL-20260824-00099/verlaengerung HTTP/1.1
+X-Role: thekendienst
+----
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleihe_id": "AL-20260824-00099",
+  "gegenstand_id": "INV-00042",
+  "mitglied_id": "M-0815",
+  "ausgabe_datum": "2026-08-24",
+  "rückgabefrist": "2026-09-21",
+  "verlaengert": true,
+  "status": "aktiv"
+}
+----
+
+Die neue Rückgabefrist ergibt sich als `alte_frist + leihdauer_tage_der_kategorie` (BR-10).
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`UNGUELTIGE_AUSLEIHE_ID`
+|`id` ist keine gültige UUID
+
+|403
+|`ROLLE_UNZULAESSIG`
+|`X-Role` ist nicht `thekendienst` oder `mitglied`
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Keine Ausleihe mit dieser ID
+
+|409
+|`AUSLEIHE_NICHT_AKTIV`
+|Ausleihe ist bereits abgeschlossen
+
+|409
+|`BEREITS_VERLAENGERT`
+|Die Ausleihe wurde bereits einmal verlängert (BR-10)
+
+|409
+|`AUSLEIHE_UEBERFAELLIG`
+|Rückgabefrist ist abgelaufen (BR-11, BR-35)
+
+|409
+|`VORMERKUNG_OFFEN`
+|Für die Kategorie des Gegenstands besteht mindestens eine offene Vormerkung (BR-11)
+|===
+
+---
+
+=== POST /ausleihen/{id}/rueckgabe
+
+Nimmt einen Gegenstand an der Theke zurück. Versetzt ihn in den Zustand `in_pruefung`. Beendet die Ausleihe *nicht* (BR-12). Nur Rolle `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+POST /ausleihen/AL-20260824-00099/rueckgabe HTTP/1.1
+Content-Type: application/json
+X-Role: thekendienst
+
+{
+  "auffaelligkeiten": "Netzkabel angeschmort, Bohrer fehlt."
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`auffaelligkeiten`
+|string
+|nein
+|Optionaler Freitext, max. 1 000 Zeichen. Die Theke entscheidet *nicht* über Kautionsabzüge (BR-13, BR-14). Ein leerer Body (`{}`) ist gültig.
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleihe_id": "AL-20260824-00099",
+  "gegenstand_id": "INV-00042",
+  "zustand": "in_Prüfung",
+  "zeitstempel_rueckgabe": "2026-09-07T14:30:00Z"
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_NICHT_BERECHTIGT`
+|`X-Role` ist nicht `thekendienst`
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|`id` existiert nicht
+
+|422
+|`GEGENSTAND_BEREITS_ZURUECKGEGEBEN`
+|Gegenstand hat bereits den Zustand `in_pruefung` oder Ausleihe ist abgeschlossen
+|===
+
+---
+
+=== POST /ausleihen/{id}/pruefprotokoll
+
+Erstellt ein Prüfprotokoll, schließt die Ausleihe ab, gibt die Kaution (teil-)frei und versetzt den Gegenstand in den Nachzustand. Nur Rolle `wart`.
+
+==== Klärung Q7 — Schadenszurechnung (Vorschaden-Kontext)
+
+Die Response enthält zusätzlich das letzte Prüfprotokoll desselben Gegenstands unter dem Feld `vorheriges_pruefprotokoll` (kann `null` sein). So sieht der Wart dokumentierte Vorschäden ohne Extra-Abfrage (BR-16).
+
+==== Verarbeitungslogik (transaktional)
+
+. Nutzungszähler um 1 erhöhen (BR-23).
+. Effektiven Nachzustand bestimmen:
+  * Falls `nutzungszaehler_neu ≥ wartungsintervall_kategorie` → Effektiv: `wartungsfaellig` (BR-24, überschreibt Eingabe).
+  * Falls `nachzustand = verloren` → Effektiv: `ausgemustert`, Kautionsabzug = volle Kaution (BR-19).
+  * Andernfalls → Effektiv: eingegebener `nachzustand`.
+. Kautionsbewegung erzeugen (BR-20, BR-22).
+. Gegenstandszustand setzen:
+  * `wartungsfaellig` oder `ausgemustert` → Zustand direkt setzen; Warteschlange unberührt (BR-32).
+  * `verfügbar` → Offene Vormerkung? Ja → `reserviert` (BR-30, BR-33). Nein → `verfügbar`.
+
+==== Request
+
+[source,http]
+----
+POST /ausleihen/AL-20260824-00099/pruefprotokoll HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "nachzustand": "verfügbar",
+  "kautionsabzug": 10,
+  "begruendung": "Kleiner Kratzer am Gehäuse."
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`nachzustand`
+|string (Enum)
+|ja
+|Geforderter Nachzustand: `verfügbar` \| `wartungsfällig` \| `ausgemustert` \| `verloren`
+
+|`kautionsabzug`
+|integer ≥ 0
+|ja
+|Kautionsabzug in ganzen Euro. `0` = kein Abzug. Darf hinterlegte Kaution nicht übersteigen (BR-21).
+
+|`begruendung`
+|string
+|nein
+|Freitextbegründung, max. 1 000 Zeichen. (BR-18)
+|===
+
+==== Response 201 Created
+
+[source,json]
+----
+{
+  "pruefprotokoll_id": "pp-9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+  "ausleihe_id": "AL-20260824-00099",
+  "gegenstand_id": "INV-00042",
+  "wart_id": "wart-rolf",
+  "zeitstempel": "2026-08-24T10:15:30Z",
+  "nachzustand_eingabe": "verfügbar",
+  "nachzustand_effektiv": "reserviert",
+  "kautionsabzug": 10,
+  "kaution_freigegeben": 30,
+  "begruendung": "Kleiner Kratzer am Gehäuse.",
+  "reserviert_fuer": "M-0815",
+  "vorheriges_pruefprotokoll": {
+    "pruefprotokoll_id": "pp-aabbcc11",
+    "zeitstempel": "2026-06-10T09:00:00Z",
+    "kautionsabzug": 0,
+    "nachzustand_effektiv": "verfügbar",
+    "begruendung": null
+  }
+}
+----
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|`nachzustand_eingabe`
+|Vom Wart übermittelter Nachzustand
+
+|`nachzustand_effektiv`
+|Tatsächlich gesetzter Zustand (kann abweichen, z. B. durch BR-24 oder BR-30)
+
+|`kaution_freigegeben`
+|Betrag in Euro, der dem Mitglied zurückgeht
+
+|`reserviert_fuer`
+|Mitglied-ID, für das reserviert wurde; nur bei `nachzustand_effektiv = reserviert`; sonst `null`
+
+|`vorheriges_pruefprotokoll`
+|Letztes Prüfprotokoll desselben Gegenstands (Q7). `null` wenn kein früheres existiert.
+|===
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ROLLE_NICHT_ERLAUBT`
+|`X-Role` ist nicht `wart`
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Ausleihe-ID existiert nicht
+
+|409
+|`GEGENSTAND_NICHT_IN_PRUEFUNG`
+|Gegenstand hat nicht den Zustand `in_pruefung`
+
+|409
+|`PRUEFPROTOKOLL_BEREITS_VORHANDEN`
+|Für diese Ausleihe wurde bereits ein Prüfprotokoll erstellt
+
+|422
+|`NACHZUSTAND_UNGUELTIG`
+|`nachzustand` ist kein erlaubter Enum-Wert
+
+|422
+|`KAUTIONSABZUG_NEGATIV`
+|`kautionsabzug` < 0
+
+|422
+|`KAUTIONSABZUG_ZU_HOCH`
+|`kautionsabzug` übersteigt die hinterlegte Kaution (BR-21)
+
+|422
+|`BEGRUENDUNG_ZU_LANG`
+|`begruendung` überschreitet 1 000 Zeichen
+|===
+
+---
+
+=== POST /ausleihen/{id}/verloren
+
+Erklärt einen Gegenstand als verloren, ohne dass eine körperliche Rückgabe vorausgegangen ist. Erstellt intern ein Prüfprotokoll mit `nachzustand = verloren`, behält die Kaution vollständig ein und mustert den Gegenstand aus (BR-19). Nur Rolle `wart`.
+
+NOTE: Ist der Gegenstand bereits im Zustand `in_pruefung` (körperlich zurückgegeben), ist `POST /ausleihen/{id}/pruefprotokoll` mit `nachzustand = verloren` zu verwenden.
+
+==== Request
+
+[source,http]
+----
+POST /ausleihen/AL-20260824-00099/verloren HTTP/1.1
+Content-Type: application/json
+X-Role: wart
+
+{
+  "begruendung": "Mitglied reagiert seit vier Wochen nicht auf Mahnungen."
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`begruendung`
+|string
+|nein
+|Optionaler Freitext, max. 1 000 Zeichen. Ein leerer Body (`{}`) ist gültig.
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleihe_id": "AL-20260824-00099",
+  "gegenstand_id": "INV-00042",
+  "mitglied_id": "M-0815",
+  "pruefprotokoll_id": "pp-0099",
+  "nachzustand": "verloren",
+  "gegenstand_zustand": "ausgemustert",
+  "ausleihe_status": "abgeschlossen",
+  "kautionsabzug_eur": 40,
+  "audit_eintrag_id": "ae-0201",
+  "zeitstempel": "2026-08-24T10:15:00Z",
+  "begruendung": "Mitglied reagiert seit vier Wochen nicht auf Mahnungen."
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`UNGUELTIGE_AUSLEIHE_ID`
+|`id` ist keine gültige UUID
+
+|403
+|`ROLLE_NICHT_BERECHTIGT`
+|`X-Role` ist nicht `wart`
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Keine Ausleihe mit dieser ID
+
+|409
+|`AUSLEIHE_BEREITS_ABGESCHLOSSEN`
+|Ausleihe ist bereits abgeschlossen
+
+|409
+|`GEGENSTAND_IN_PRUEFUNG`
+|Gegenstand wurde bereits physisch zurückgegeben (Zustand `in_pruefung`). UC-04 verwenden.
+
+|409
+|`GEGENSTAND_BEREITS_AUSGEMUSTERT`
+|Gegenstand ist bereits ausgemustert
+|===
+
+---
+
+== Ressourcengruppe: Vormerkung
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,1,2,3"]
+|===
+|Methode |Pfad |Kurzbeschreibung |Actor |UC-Ref |Wichtigste Fehlercodes
+
+|POST
+|`/vormerkungen`
+|Vormerkung anlegen
+|mitglied, thekendienst
+|UC-05
+|`KATEGORIE_NICHT_GEFUNDEN`, `VORMERKUNG_BEREITS_VORHANDEN`
+
+|GET
+|`/vormerkungen`
+|Vormerkungen eines Mitglieds abfragen
+|mitglied, thekendienst
+|UC-05
+|`EINGABE_UNGUELTIG`, `MITGLIED_NICHT_GEFUNDEN`
+
+|DELETE
+|`/vormerkungen/{id}`
+|Vormerkung stornieren
+|mitglied, thekendienst
+|UC-05
+|`VORMERKUNG_NICHT_GEFUNDEN`, `ZUGRIFF_VERWEIGERT`
+|===
+
+---
+
+=== POST /vormerkungen
+
+Legt einen Platz in der Warteschlange einer Kategorie für ein Mitglied an (BR-27–BR-29). Ist beim Anlegen bereits ein Gegenstand der Kategorie verfügbar, wird dieser sofort reserviert (BR-30, BR-31). Rollen `mitglied` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+POST /vormerkungen HTTP/1.1
+Content-Type: application/json
+X-Role: mitglied
+
+{
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007"
+}
+----
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|string
+|ja
+|ID des Mitglieds, das vormerken möchte
+
+|`kategorie_id`
+|string
+|ja
+|ID der Kategorie, für die vorgemerkt werden soll (BR-27)
+|===
+
+==== Response 201 Created — kein sofort verfügbarer Gegenstand
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0815",
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:34:00Z",
+  "position_in_schlange": 3,
+  "reservierung": null,
+  "hinweis": null
+}
+----
+
+==== Response 201 Created — sofortige Reservierung (BR-30)
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0816",
+  "mitglied_id": "M-1042",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:34:00Z",
+  "position_in_schlange": 1,
+  "reservierung": {
+    "gegenstand_id": "INV-0044",
+    "reserviert_bis": "2026-09-04"
+  },
+  "hinweis": "Gegenstand sofort reserviert. Abholung bis 2026-09-04."
+}
+----
+
+==== Response 201 Created — Mitglied gesperrt (BR-33)
+
+[source,json]
+----
+{
+  "vormerkung_id": "VM-0817",
+  "mitglied_id": "M-1099",
+  "kategorie_id": "KAT-007",
+  "kategorie_name": "Bohrhammer",
+  "eingangszeit": "2026-09-01T10:40:00Z",
+  "position_in_schlange": 4,
+  "reservierung": null,
+  "hinweis": "Ihr Konto ist gesperrt. Die Vormerkung wird registriert, eine entstehende Reservierung wird jedoch übersprungen. Ihr Platz in der Warteschlange bleibt erhalten."
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Pflichtfelder fehlen oder ungültiger Typ
+
+|404
+|`KATEGORIE_NICHT_GEFUNDEN`
+|`kategorie_id` existiert nicht
+
+|409
+|`VORMERKUNG_BEREITS_VORHANDEN`
+|Mitglied hat bereits eine offene Vormerkung für diese Kategorie (BR-28)
+|===
+
+---
+
+=== GET /vormerkungen
+
+Liefert alle Vormerkungen (inkl. etwaiger Reservierungen) eines Mitglieds. Rollen `mitglied` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+GET /vormerkungen?mitglied_id=M-1042 HTTP/1.1
+X-Role: mitglied
+----
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|string
+|ja
+|ID des Mitglieds, dessen Vormerkungen abgefragt werden sollen
+|===
+
+==== Response 200 OK
+
+[source,json]
+----
+{
+  "mitglied_id": "M-1042",
+  "vormerkungen": [
+    {
+      "vormerkung_id": "VM-0815",
+      "kategorie_id": "KAT-007",
+      "kategorie_name": "Bohrhammer",
+      "eingangszeit": "2026-09-01T10:34:00Z",
+      "position_in_schlange": 3,
+      "reservierung": null
+    },
+    {
+      "vormerkung_id": "VM-0801",
+      "kategorie_id": "KAT-003",
+      "kategorie_name": "Lastenrad",
+      "eingangszeit": "2026-08-28T08:00:00Z",
+      "position_in_schlange": 1,
+      "reservierung": {
+        "gegenstand_id": "INV-0012",
+        "reserviert_bis": "2026-09-03"
+      }
+    }
+  ]
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`EINGABE_UNGUELTIG`
+|Query-Parameter `mitglied_id` fehlt
+
+|404
+|`MITGLIED_NICHT_GEFUNDEN`
+|`mitglied_id` existiert nicht
+|===
+
+---
+
+=== DELETE /vormerkungen/{id}
+
+Storniert eine Vormerkung. Eine etwaige aktive Reservierung wird ebenfalls aufgelöst; der Gegenstand geht an das nächste Mitglied der Warteschlange oder wird `verfügbar` (BR-31). Rollen `mitglied` und `thekendienst`.
+
+==== Request
+
+[source,http]
+----
+DELETE /vormerkungen/VM-0815 HTTP/1.1
+X-Role: mitglied
+----
+
+==== Response 204 No Content
+
+Kein Antwort-Body.
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|403
+|`ZUGRIFF_VERWEIGERT`
+|Die Vormerkung gehört nicht zum anfragenden Mitglied (bei `X-Role: mitglied`). Der Thekendienst darf alle Vormerkungen stornieren.
+
+|404
+|`VORMERKUNG_NICHT_GEFUNDEN`
+|`id` existiert nicht
+|===
+
+---
+
+== Ressourcengruppe: Wartung
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,1,2,3"]
+|===
+|Methode |Pfad |Kurzbeschreibung |Actor |UC-Ref |Wichtigste Fehlercodes
+
+|POST
+|`/gegenstaende/{inventarnummer}/wartung-abschliessen`
+|Wartung abschließen (setzt Nutzungszähler auf 0, versetzt Gegenstand auf `verfügbar`)
+|wart
+|UC-06
+|`GEGENSTAND_NICHT_GEFUNDEN`, `GEGENSTAND_NICHT_WARTUNGSFAELLIG`, `ROLLE_UNGUELTIG`
+|===
+
+---
+
+=== POST /gegenstaende/{inventarnummer}/wartung-abschliessen
+
+Schließt die Wartung eines wartungsfälligen Gegenstands ab. Setzt den Nutzungszähler auf `0` (BR-25) und versetzt den Gegenstand auf `verfügbar` — oder auf `reserviert`, wenn eine offene Vormerkung für die Kategorie vorliegt (BR-30). Nur Rolle `wart`.
+
+Kein Request-Body erforderlich.
+
+==== Request
+
+[source,http]
+----
+POST /gegenstaende/WZ-0042/wartung-abschliessen HTTP/1.1
+X-Role: wart
+----
+
+==== Response 200 OK — kein Vormerker
+
+[source,json]
+----
+{
+  "inventarnummer": "WZ-0042",
+  "bezeichnung": "Bohrhammer Makita HR2630",
+  "kategorie": "bohrhammer",
+  "zustand": "verfügbar",
+  "nutzungszaehler": 0,
+  "reserviertFuer": null
+}
+----
+
+==== Response 200 OK — mit Reservierung (BR-30)
+
+[source,json]
+----
+{
+  "inventarnummer": "WZ-0042",
+  "bezeichnung": "Bohrhammer Makita HR2630",
+  "kategorie": "bohrhammer",
+  "zustand": "reserviert",
+  "nutzungszaehler": 0,
+  "reserviertFuer": {
+    "mitgliedId": "M-0117",
+    "reserviertBis": "2026-08-27"
+  }
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|400
+|`INVENTARNUMMER_LEER`
+|Inventarnummer ist leer oder fehlt
+
+|403
+|`ROLLE_UNGUELTIG`
+|`X-Role` fehlt oder ist nicht `wart`
+
+|404
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+
+|409
+|`GEGENSTAND_NICHT_WARTUNGSFAELLIG`
+|Gegenstand ist nicht im Zustand `wartungsfaellig`; aktueller Zustand im Response-Body
+|===
+
+---
+
+== Ressourcengruppe: Mitglieder
+
+NOTE: Mitgliederverwaltung (Anlegen, Ändern, Löschen) ist explizit außerhalb des Scopes (PRD: Nicht-Ziele). Diese Endpunkte dienen ausschließlich der Lesezugriff-Prüfung. Mitglieder werden über einen externen Prozess in das System importiert.
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,2"]
+|===
+|Methode |Pfad |Beschreibung |Rollen
+
+|GET |/mitglieder |Mitglieder auflisten |thekendienst, wart
+|GET |/mitglieder/{id} |Einzelnes Mitglied lesen |thekendienst, wart, mitglied
+|===
+
+=== GET /mitglieder
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|Eingabe
+a|
+Query-Parameter (alle optional):
+* `gesperrt` (Boolean) — nur gesperrte/nicht gesperrte Mitglieder
+* `name` (String) — Suche nach Namensteil (case-insensitive)
+* `limit` (Int, default 50, max 200)
+* `offset` (Int, default 0)
+
+|Verarbeitung
+a|
+1. Mitglieder laden.
+2. `gesperrt` je Mitglied berechnen: `EXISTS(Ausleihe WHERE mitglied_id = X AND status = aktiv AND rueckgabefrist < heute)` (BR-34/35).
+3. Filter anwenden.
+
+|Ausgabe (200)
+a|
+[source,json]
+----
+{
+  "mitglieder": [
+    {
+      "id": "M-0815",
+      "name": "Sabine Müller",
+      "gesperrt": false,
+      "aktive_ausleihen": 1
+    }
+  ],
+  "total": 1
+}
+----
+
+|Fehler
+a|
+* 400 `UNGUELTIGE_FILTER_PARAMETER`
+|===
+
+=== GET /mitglieder/{id}
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|Eingabe
+a|
+* `id` (Pfadparameter, Pflicht)
+
+|Verarbeitung
+a|
+1. Mitglied laden; 404 wenn nicht gefunden.
+2. `gesperrt` berechnen (BR-34/35).
+3. Aktive Ausleihen zählen.
+4. Offene Einweisungen aggregieren.
+
+|Ausgabe (200)
+a|
+[source,json]
+----
+{
+  "id": "M-0815",
+  "name": "Sabine Müller",
+  "gesperrt": false,
+  "aktive_ausleihen": 1,
+  "einweisungen": [
+    { "kategorie_id": "kat-bohrhammer", "datum": "2026-01-15" }
+  ]
+}
+----
+
+|Fehler
+a|
+* 404 `MITGLIED_NICHT_GEFUNDEN`
+|===
+
+---
+
+== Ressourcengruppe: Audit
+
+Der Audit-Log ist das Herzstück der Nachvollziehbarkeit (BR-22, Qualitätsziel "Nachvollziehbarkeit"). Jede Kautionsbewegung erzeugt einen unveränderlichen Eintrag. Der Log ist ausschließlich lesbar; kein Endpoint erlaubt das Schreiben oder Löschen von Einträgen.
+
+=== Endpunkte — Übersicht
+
+[cols="1,3,2,2"]
+|===
+|Methode |Pfad |Beschreibung |Rollen
+
+|GET |/audit |Audit-Einträge abfragen |thekendienst, wart
+|GET |/audit/{id} |Einzelnen Eintrag lesen |thekendienst, wart
+|===
+
+=== GET /audit
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|Eingabe
+a|
+Query-Parameter (alle optional):
+* `ausleihe_id` (UUID) — Einträge einer bestimmten Ausleihe
+* `mitglied_id` (String) — alle Einträge eines Mitglieds (über Ausleihe)
+* `gegenstand_inventarnummer` (String) — alle Einträge eines Gegenstands
+* `art` (Enum: `hinterlegung` \| `abzug` \| `freigabe`)
+* `von` (Date ISO 8601) — Beginn des Zeitraums
+* `bis` (Date ISO 8601) — Ende des Zeitraums
+* `limit` (Int, default 100, max 500)
+* `offset` (Int, default 0)
+
+|Verarbeitung
+a|
+1. Filter validieren (von ≤ bis, gültige Enum-Werte).
+2. Kautionsbewegungen laden und filtern.
+3. Absteigend nach Zeitstempel sortieren.
+
+|Ausgabe (200)
+a|
+[source,json]
+----
+{
+  "eintraege": [
+    {
+      "id": "audit-001",
+      "zeitstempel": "2026-08-24T10:30:00Z",
+      "art": "hinterlegung",
+      "betrag_euro": 20,
+      "ausleihe_id": "ausleihe-123",
+      "mitglied_id": "M-0815",
+      "gegenstand_inventarnummer": "BH-042",
+      "pruefprotokoll_id": null,
+      "beschreibung": "Kaution hinterlegt bei Ausgabe"
+    }
+  ],
+  "total": 1
+}
+----
+
+|Fehler
+a|
+* 400 `UNGUELTIGE_FILTER_PARAMETER`
+* 400 `ZEITRAUM_UNGUELTIG` (von > bis)
+|===
+
+=== GET /audit/{id}
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|Eingabe
+a|
+* `id` (Pfadparameter, Pflicht)
+
+|Verarbeitung
+a|
+1. Audit-Eintrag laden; 404 wenn nicht gefunden.
+
+|Ausgabe (200)
+a|
+Wie einzelnes Objekt aus GET /audit.
+
+|Fehler
+a|
+* 404 `AUDIT_EINTRAG_NICHT_GEFUNDEN`
+|===
+
+---
+
+== CLI-Kommando-Referenz
+
+Alle CLI-Kommandos senden intern HTTP-Anfragen an die REST-API mit dem Header `X-Role: wart`.
+
+=== Prüfprotokoll erstellen
+
+[source,shell]
+----
+leihgut pruefprotokoll erstellen \
+  --ausleihe-id <uuid> \
+  --nachzustand <verfügbar|wartungsfällig|ausgemustert|verloren> \
+  --abzug <euro> \
+  [--begruendung <text>] \
+  [--role wart]
+----
+
+[cols="1,1,3"]
+|===
+|Flag |Pflicht |Beschreibung
+
+|`--ausleihe-id`
+|ja
+|UUID der Ausleihe, für die das Prüfprotokoll erstellt wird
+
+|`--nachzustand`
+|ja
+|Einer der Werte: `verfügbar`, `wartungsfällig`, `ausgemustert`, `verloren`
+
+|`--abzug`
+|ja
+|Kautionsabzug in ganzen Euro. `0` für keine Minderung.
+
+|`--begruendung`
+|nein
+|Optionaler Freitext, in Anführungszeichen, max. 1 000 Zeichen
+
+|`--role`
+|nein
+|Standard: `wart`. Entspricht HTTP-Header `X-Role`.
+|===
+
+Entspricht: `POST /ausleihen/{ausleihe_id}/pruefprotokoll`
+
+.Beispiel — saubere Rückgabe
+[source,shell]
+----
+leihgut pruefprotokoll erstellen \
+  --ausleihe-id a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  --nachzustand verfügbar \
+  --abzug 0
+----
+
+.Beispiel — Rückgabe mit Abzug
+[source,shell]
+----
+leihgut pruefprotokoll erstellen \
+  --ausleihe-id a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  --nachzustand verfügbar \
+  --abzug 15 \
+  --begruendung "Schleifscheibe beschädigt, Gehäuse verkratzt."
+----
+
+.Ausgabe — Erfolg
+[source,text]
+----
+Prüfprotokoll erstellt.
+  Protokoll-ID   : pp-9f8e7d6c-5b4a-3210-fedc-ba9876543210
+  Gegenstand     : INV-00042 (Bohrhammer Makita HR2630)
+  Nachzustand    : reserviert  [eingegeben: verfügbar → BR-30 aktiv]
+  Kautionsabzug  : 10 €
+  Kaution frei   : 40 €
+  Reserviert für : M-0815
+----
+
+.Ausgabe — Fehler
+[source,text]
+----
+Fehler: KAUTIONSABZUG_ZU_HOCH
+  Der angegebene Abzug (80 €) übersteigt die hinterlegte Kaution (50 €).
+  Maximaler Abzug: 50 €
+----
+
+---
+
+=== Verloren melden
+
+[source,shell]
+----
+leihgut verloren melden \
+  --ausleihe-id <uuid> \
+  [--begruendung <text>]
+----
+
+[cols="1,1,3"]
+|===
+|Flag |Pflicht |Beschreibung
+
+|`--ausleihe-id`
+|ja
+|UUID der aktiven Ausleihe
+
+|`--begruendung`
+|nein
+|Optionaler Freitext für das Prüfprotokoll (max. 1 000 Zeichen)
+|===
+
+Entspricht: `POST /ausleihen/{ausleihe_id}/verloren`
+
+.Beispiel
+[source,shell]
+----
+leihgut verloren melden \
+  --ausleihe-id a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  --begruendung "Mitglied reagiert seit vier Wochen nicht auf Mahnungen."
+----
+
+---
+
+=== Wartung abschließen
+
+[source,shell]
+----
+leihgut wartung abschliessen --inventarnummer <nr> [--role wart]
+----
+
+[cols="1,1,1,3"]
+|===
+|Flag |Kurzform |Pflicht |Beschreibung
+
+|`--inventarnummer`
+|`-i`
+|ja
+|Inventarnummer des zu wartenden Gegenstands
+
+|`--role`
+|—
+|nein
+|Standard: `wart`.
+|===
+
+Entspricht: `POST /gegenstaende/{inventarnummer}/wartung-abschliessen`
+
+.Ausgabe — Erfolg (kein Vormerker)
+[source,text]
+----
+✓ Wartung abgeschlossen.
+  Gegenstand : WZ-0042 — Bohrhammer Makita HR2630
+  Zustand    : verfügbar
+  Zähler     : 0
+----
+
+.Ausgabe — Erfolg (mit Reservierung)
+[source,text]
+----
+✓ Wartung abgeschlossen.
+  Gegenstand      : WZ-0042 — Bohrhammer Makita HR2630
+  Zustand         : reserviert
+  Zähler          : 0
+  Reserviert für  : Mitglied M-0117 (bis 2026-08-27)
+----
+
+.Ausgabe — Fehler
+[source,text]
+----
+✗ Fehler: Gegenstand WZ-0042 ist nicht wartungsfällig (aktueller Zustand: verfügbar).
+  Fehlercode: GEGENSTAND_NICHT_WARTUNGSFAELLIG
+  Exit-Code: 1
+----
+
+Exit-Codes: `0` = Erfolg, `1` = fachlicher Fehler, `2` = Systemfehler.
+
+---
+
+=== Einweisung dokumentieren
+
+[source,shell]
+----
+leihgut einweisung dokumentieren \
+  --mitglied-id <id> \
+  --kategorie-id <id>
+----
+
+[cols="1,1,3"]
+|===
+|Flag |Pflicht |Beschreibung
+
+|`--mitglied-id`
+|ja
+|ID des eingewiesenen Mitglieds
+
+|`--kategorie-id`
+|ja
+|ID der Kategorie, für die die Einweisung gilt
+|===
+
+Entspricht: `POST /einweisungen`
+
+---
+
+== Fehlercode-Verzeichnis
+
+Alle im System verwendeten Fehlercodes, alphabetisch, mit HTTP-Status und Beschreibung.
+
+[cols="3,1,4,2"]
+|===
+|Fehlercode |HTTP-Status |Beschreibung |UC / BR
+
+|`AUSLEIHE_BEREITS_ABGESCHLOSSEN`
+|409
+|Die Ausleihe ist bereits abgeschlossen (Prüfprotokoll liegt vor).
+|UC-07
+
+|`AUSLEIHE_NICHT_AKTIV`
+|409
+|Die Ausleihe ist nicht mehr aktiv (kein aktiver Status).
+|UC-02
+
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|404
+|Keine Ausleihe mit der angegebenen ID.
+|UC-02, UC-03, UC-04, UC-07
+
+|`AUSLEIHE_UEBERFAELLIG`
+|409
+|Die Rückgabefrist der Ausleihe liegt vor dem heutigen Datum.
+|UC-02, BR-11, BR-35
+
+|`AUSLEIHLIMIT_ERREICHT`
+|422
+|Mitglied führt bereits 3 aktive Ausleihen.
+|UC-01, BR-06
+
+|`BEREITS_VERLAENGERT`
+|409
+|Die Ausleihe wurde bereits einmal verlängert.
+|UC-02, BR-10
+
+|`BEGRUENDUNG_ZU_LANG`
+|422
+|Das Freitextfeld `begruendung` überschreitet 1 000 Zeichen.
+|UC-04, UC-07
+
+|`EINWEISUNG_BEREITS_VORHANDEN`
+|409
+|Für dieses Mitglied in dieser Kategorie ist bereits eine Einweisung dokumentiert.
+|BR-08
+
+|`EINWEISUNG_FEHLT`
+|422
+|Kategorie ist einweisungspflichtig; Mitglied hat keine dokumentierte Einweisung.
+|UC-01, BR-08
+
+|`EINWEISUNG_NICHT_GEFUNDEN`
+|404
+|Keine Einweisung mit der angegebenen ID.
+|BR-08
+
+|`EINGABE_UNGUELTIG`
+|400
+|Pflichtfeld fehlt, Typ falsch oder Wert außerhalb des erlaubten Bereichs.
+|UC-05, UC-08
+
+|`EINGABE_UNVOLLSTAENDIG`
+|400
+|Mindestens ein Pflichtfeld fehlt oder ist leer.
+|UC-01
+
+|`GEGENSTAND_BEREITS_AUSGEMUSTERT`
+|409
+|Der Gegenstand ist bereits ausgemustert.
+|UC-07
+
+|`GEGENSTAND_BEREITS_ZURUECKGEGEBEN`
+|422
+|Gegenstand ist bereits im Zustand `in_pruefung` oder Ausleihe ist abgeschlossen.
+|UC-03, BR-12
+
+|`GEGENSTAND_HAT_AKTIVE_AUSLEIHEN`
+|422
+|Ausmusterung nicht möglich: Gegenstand ist `ausgeliehen` oder `in_pruefung`.
+|UC-08b
+
+|`GEGENSTAND_IN_PRUEFUNG`
+|409
+|Gegenstand wurde physisch zurückgegeben und befindet sich in Prüfung. UC-04 verwenden.
+|UC-07, BR-19
+
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|404
+|Kein Gegenstand mit der angegebenen Inventarnummer.
+|UC-01, UC-06, UC-08b
+
+|`GEGENSTAND_NICHT_IN_PRUEFUNG`
+|409
+|Gegenstand hat nicht den Zustand `in_pruefung`.
+|UC-04, BR-12
+
+|`GEGENSTAND_NICHT_VERFUEGBAR`
+|422
+|Gegenstand ist weder `verfügbar` noch für dieses Mitglied `reserviert`.
+|UC-01, BR-05
+
+|`GEGENSTAND_NICHT_WARTUNGSFAELLIG`
+|409
+|Gegenstand ist nicht im Zustand `wartungsfaellig`. Aktueller Zustand im Response-Body.
+|UC-06, BR-25, BR-26
+
+|`GEGENSTAND_WARTUNGSFAELLIG`
+|422
+|Gegenstand ist wartungsfällig und darf nicht ausgegeben werden.
+|UC-01, BR-26
+
+|`INVENTARNUMMER_DOPPELT`
+|409
+|Ein Gegenstand mit dieser Inventarnummer existiert bereits.
+|UC-08b, BR-01
+
+|`INVENTARNUMMER_LEER`
+|400
+|Die Inventarnummer ist leer oder fehlt im Pfad.
+|UC-06
+
+|`KATEGORIE_NAME_DOPPELT`
+|409
+|Eine Kategorie mit diesem Namen existiert bereits.
+|UC-08a
+
+|`KATEGORIE_NICHT_GEFUNDEN`
+|404
+|Keine Kategorie mit der angegebenen ID.
+|UC-05, UC-08a, UC-08b
+
+|`KATEGORIENWECHSEL_NICHT_ERLAUBT`
+|422
+|Kategorienwechsel nicht möglich, weil Gegenstand `ausgeliehen`, `in_pruefung` oder `reserviert` ist.
+|Q8
+
+|`KAUTIONSABZUG_NEGATIV`
+|422
+|`kautionsabzug` ist kleiner als 0.
+|UC-04, BR-21
+
+|`KAUTIONSABZUG_ZU_HOCH`
+|422
+|`kautionsabzug` übersteigt die hinterlegte Kaution.
+|UC-04, BR-21
+
+|`MITGLIED_GESPERRT`
+|422
+|Mitglied hat mindestens eine überfällige Ausleihe und ist gesperrt.
+|UC-01, BR-07, BR-34, BR-35
+
+|`MITGLIED_NICHT_GEFUNDEN`
+|404
+|Kein Mitglied mit der angegebenen ID.
+|UC-01, UC-05
+
+|`NACHZUSTAND_UNGUELTIG`
+|422
+|`nachzustand` ist kein erlaubter Enum-Wert.
+|UC-04, BR-17, BR-18
+
+|`PRUEFPROTOKOLL_BEREITS_VORHANDEN`
+|409
+|Für diese Ausleihe wurde bereits ein Prüfprotokoll erstellt.
+|UC-04, BR-15
+
+|`ROLLE_NICHT_BERECHTIGT`
+|403
+|Aufrufer trägt nicht die für diesen Endpunkt erforderliche Rolle.
+|UC-03, UC-07
+
+|`ROLLE_NICHT_ERLAUBT`
+|403
+|Aufrufer trägt nicht die Rolle `wart` (spezifisch für Prüfprotokoll-Endpunkt).
+|UC-04
+
+|`ROLLE_UNGUELTIG`
+|403
+|Header `X-Role` fehlt oder enthält keinen gültigen Wert (spezifisch für Wartung).
+|UC-06
+
+|`ROLLE_UNZULAESSIG`
+|403
+|Header `X-Role` enthält nicht die für diesen Endpunkt erlaubte Rolle.
+|UC-01, UC-08
+
+|`UNGUELTIGE_AUSLEIHE_ID`
+|400
+|`ausleihe_id` ist keine gültige UUID.
+|UC-02, UC-07
+
+|`UNGÜLTIGES_DATUM`
+|400
+|`ausgabedatum` ist kein gültiges ISO-8601-Datum oder liegt in der Zukunft.
+|UC-01
+
+|`VORMERKUNG_BEREITS_VORHANDEN`
+|409
+|Mitglied hat bereits eine offene Vormerkung für diese Kategorie.
+|UC-05, BR-28
+
+|`VORMERKUNG_NICHT_GEFUNDEN`
+|404
+|Keine Vormerkung mit der angegebenen ID.
+|UC-05
+
+|`VORMERKUNG_OFFEN`
+|409
+|Für die Kategorie des Gegenstands besteht mindestens eine offene Vormerkung.
+|UC-02, BR-11
+
+|`ZUGRIFF_VERWEIGERT`
+|403
+|Die angeforderte Ressource gehört nicht zum anfragenden Mitglied.
+|UC-05
+
+|`AUDIT_EINTRAG_NICHT_GEFUNDEN`
+|404
+|Kein Audit-Eintrag mit der angegebenen ID.
+|Audit
+
+|`UNGUELTIGE_FILTER_PARAMETER`
+|400
+|Ein oder mehrere Query-Parameter haben ungültige Werte (Enum, Typ, Format).
+|Audit, Mitglieder
+
+|`ZEITRAUM_UNGUELTIG`
+|400
+|Der Filterwert `von` liegt nach `bis`.
+|Audit
+|===
+
+---
+
+== Änderungshistorie
+
+[cols="1,1,1,4"]
+|===
+|Version |Datum |Klärung |Beschreibung
+
+|1.0
+|2026-08-24
+|Q7 — Schadenszurechnung
+a|`POST /ausleihen/{id}/pruefprotokoll` liefert im Response-Body das Feld `vorheriges_pruefprotokoll` (kann `null` sein). Es enthält das letzte bereits vorhandene Prüfprotokoll desselben Gegenstands. Damit sieht der Wart dokumentierte Vorschäden ohne eine separate Abfrage (BR-16).
+
+|1.0
+|2026-08-24
+|Q8 — Kategorienwechsel
+a|`PUT /gegenstaende/{inventarnummer}` erlaubt einen Kategorienwechsel (Änderung von `kategorieId`) nur, wenn der Gegenstand im Zustand `verfügbar` oder `wartungsfaellig` ist. Bei einem Kategorienwechsel wird der `nutzungszaehler` automatisch auf `0` zurückgesetzt. Ist der Gegenstand im Zustand `ausgeliehen`, `in_pruefung` oder `reserviert`, wird der Fehler `422 KATEGORIENWECHSEL_NICHT_ERLAUBT` zurückgegeben.
+
+|1.0
+|2026-08-24
+|Q9 — Checkout bei Reservierung
+a|`POST /ausleihen` erkennt einen Gegenstand im Zustand `reserviert für dieses Mitglied` automatisch als ausgabefähig (BR-05). Die Reservierung wird bei der Ausgabe gelöscht. Es ist kein separater Checkout-Endpunkt für reservierte Gegenstände vorgesehen.
+
+|1.1
+|2026-08-24
+|Lücke: Mitglied-Existenz
+a|`GET /mitglieder` und `GET /mitglieder/{id}` ergänzt. Read-only: Mitgliederverwaltung bleibt außerhalb des Scopes. Jede Operation mit unbekannter `mitglied_id` liefert `404 MITGLIED_NICHT_GEFUNDEN`.
+
+|1.1
+|2026-08-24
+|Lücke: Audit-Log abfragbar
+a|`GET /audit` und `GET /audit/{id}` ergänzt. Filterbar nach Ausleihe, Mitglied, Gegenstand, Art und Zeitraum. Unveränderlich (kein POST/PUT/DELETE).
+|===

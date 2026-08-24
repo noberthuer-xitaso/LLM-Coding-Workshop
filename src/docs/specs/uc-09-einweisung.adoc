@@ -1,0 +1,751 @@
+= UC-09: Einweisung dokumentieren
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+== Persona Use Case (Cockburn Fully Dressed)
+
+=== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID          |UC-09
+|Name           |Einweisung dokumentieren
+|Scope          |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level          |User Goal
+|Primary Actor  |Rolf (Wart)
+|Unterstützte Personas |Sabine (Mitglied) — erhält nach dokumentierter Einweisung Zugang zu einweisungspflichtigen Geräten
+|Häufigkeit     |Unregelmäßig; typischerweise ein- bis mehrmals pro Öffnungstag, wenn neue Mitglieder eingewiesen werden oder vorhandene Mitglieder eine neue Gerätekategorie nutzen möchten.
+|Relevante BRs  |BR-02, BR-08
+|===
+
+=== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interessen
+
+|Rolf (Wart)
+|Einweisung schnell und fehlerfrei im System erfassen können. Klare Rückmeldung, ob die Einweisung neu angelegt wurde oder bereits vorhanden ist. Keine versehentlichen Doppeleinträge.
+
+|Sabine (Mitglied)
+|Nach der Einweisung unmittelbar einweisungspflichtige Geräte ausleihen dürfen (BR-08). Sicherheit, dass die Einweisung dauerhaft gespeichert ist und nicht erneut nachgewiesen werden muss.
+
+|Karim (Thekendienst)
+|Verlässliche Prüfbarkeit, ob für ein Mitglied eine gültige Einweisung für eine Kategorie vorliegt, damit Ausgabe und Verweigerung eindeutig entschieden werden können (BR-08).
+
+|Verein
+|Keine Ausgabe einweisungspflichtiger Geräte ohne dokumentierte Einweisung (BR-08). Nachvollziehbarkeit: Wer hat wann eingewiesen? Einweisungen sind unveränderlich — kein Löschen.
+|===
+
+=== Vorbedingungen
+
+. Der Wart ist im System mit der Rolle `wart` identifiziert (Header `X-Role: wart`).
+. Die Mitglieds-ID des einzuweisenden Mitglieds ist bekannt und im System vorhanden.
+. Die Kategorie-ID der betreffenden Kategorie ist bekannt und im System vorhanden.
+. Die Kategorie ist als einweisungspflichtig markiert (BR-02).
+. Für das Mitglied liegt noch keine dokumentierte Einweisung für diese Kategorie vor.
+
+=== Nachbedingungen (Erfolgsgarantie)
+
+. Eine Einweisung ist im System dauerhaft gespeichert mit: Einweisungs-ID (UUID), `mitglied_id`, `kategorie_id`, `datum` und `dokumentiert_von` (Wart-ID aus Header `X-Role`).
+. Das Mitglied darf ab sofort Gegenstände der eingewiesenen Kategorie ausleihen (BR-08).
+. Die Einweisung kann nicht gelöscht oder rückgängig gemacht werden.
+
+=== Hauptszenario
+
+Akteur: Rolf (Wart). Mitglied: Sabine (anwesend nach körperlicher Einweisung am Gerät).
+
+. Rolf hat Sabine körperlich in die Bedienung eines einweisungspflichtigen Geräts eingewiesen.
+. Rolf gibt die Mitglieds-ID von Sabine und die Kategorie-ID ein; optional gibt er das Datum der Einweisung an (Standard: heutiges Datum).
+. *[BR-02]* Das System prüft, ob die Kategorie einweisungspflichtig ist. → Kategorie ist einweisungspflichtig.
+. Das System prüft, ob das Mitglied existiert. → Mitglied gefunden.
+. Das System prüft, ob die Kategorie existiert. → Kategorie gefunden.
+. Das System prüft, ob für dieses Mitglied bereits eine Einweisung für diese Kategorie vorliegt. → Keine Einweisung vorhanden.
+. Das System legt die Einweisung an: neue UUID, `mitglied_id`, `kategorie_id`, `datum` (eingegeben oder heutiges Datum), `dokumentiert_von` aus Header `X-Role`.
+. Das System antwortet mit HTTP 201 und der vollständigen Einweisungsrepräsentation.
+. Rolf erhält die Bestätigung. Sabine darf ab sofort Gegenstände dieser Kategorie ausleihen.
+
+=== Erweiterungen
+
+==== 6a — Einweisung bereits vorhanden (Idempotenz) (BR-08)
+
+. Das System stellt fest, dass für das Mitglied bereits eine dokumentierte Einweisung für diese Kategorie existiert.
+. Das System legt *keine* neue Einweisung an.
+. Das System antwortet mit HTTP 409 und Fehlercode `EINWEISUNG_BEREITS_VORHANDEN`, ergänzt durch die ID und das Datum der bestehenden Einweisung im Response-Body.
+. Rolf sieht die Daten der vorhandenen Einweisung und kann den Vorgang abschließen.
+. Use Case endet ohne Änderung des Systemzustands.
+
+NOTE: Alternativverhalten: Implementierungen dürfen statt HTTP 409 auch HTTP 200 mit der bestehenden Einweisung zurückgeben, wenn strikte Idempotenz (PUT-Semantik) gewünscht ist. Die Entscheidung ist in einem ADR festzuhalten. Diese Spezifikation beschreibt die 409-Variante als Standard.
+
+==== 3a — Kategorie nicht einweisungspflichtig (BR-02)
+
+. Das System stellt fest, dass die Kategorie nicht als einweisungspflichtig markiert ist.
+. Das System antwortet mit HTTP 422 und Fehlercode `KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG`.
+. Rolf erhält den Hinweis, dass für diese Kategorie keine Einweisung erforderlich ist und daher keine dokumentiert werden muss.
+. Use Case endet ohne Anlage einer Einweisung.
+
+==== 4a — Mitglied nicht gefunden
+
+. Die angegebene Mitglieds-ID ist im System unbekannt.
+. Das System antwortet mit HTTP 404 und Fehlercode `MITGLIED_NICHT_GEFUNDEN`.
+. Use Case endet ohne Anlage einer Einweisung.
+
+==== 5a — Kategorie nicht gefunden
+
+. Die angegebene Kategorie-ID ist im System unbekannt.
+. Das System antwortet mit HTTP 404 und Fehlercode `KATEGORIE_NICHT_GEFUNDEN`.
+. Use Case endet ohne Anlage einer Einweisung.
+
+---
+
+== System Use Cases
+
+=== REST-API
+
+==== POST /einweisungen
+
+Dieser Endpunkt dokumentiert eine Einweisung eines Mitglieds für eine Kategorie.
+Nur die Rolle `wart` darf ihn aufrufen.
+
+===== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`mitgliedId`
+|string
+|ja
+|Mitglieds-ID des einzuweisenden Mitglieds
+
+|`kategorieId`
+|string
+|ja
+|Kategorie-ID der Gerätekategorie, für die eingewiesen wird
+
+|`datum`
+|string (ISO 8601: `YYYY-MM-DD`)
+|nein
+|Datum der Einweisung; fehlt es, verwendet das System das aktuelle Datum
+|===
+
+HTTP-Header:
+
+[source]
+----
+X-Role: wart
+Content-Type: application/json
+----
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "mitgliedId":  "M-0815",
+  "kategorieId": "CAT-kettensaege",
+  "datum":       "2026-08-24"
+}
+----
+
+===== Validierung
+
+[cols="1,2,2"]
+|===
+|Feld |Regel |Fehlercode
+
+|`mitgliedId`
+|Nicht leer; Mitglied muss im System existieren
+|`MITGLIED_NICHT_GEFUNDEN`
+
+|`kategorieId`
+|Nicht leer; Kategorie muss im System existieren
+|`KATEGORIE_NICHT_GEFUNDEN`
+
+|`datum`
+|ISO-8601-Datum, falls angegeben; darf nicht in der Zukunft liegen
+|`UNGÜLTIGES_DATUM`
+
+|`X-Role`
+|Muss `wart` sein
+|`ROLLE_UNZULAESSIG` (HTTP 403)
+|===
+
+===== Verarbeitung
+
+. Eingabevalidierung: `mitgliedId`, `kategorieId`, optionales `datum`.
+. Mitglied laden; falls nicht gefunden → `MITGLIED_NICHT_GEFUNDEN` (404).
+. Kategorie laden; falls nicht gefunden → `KATEGORIE_NICHT_GEFUNDEN` (404).
+. *[BR-02]* Einweisungspflicht prüfen: Ist die Kategorie einweisungspflichtig? Falls nein → `KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG` (422).
+. Auf vorhandene Einweisung prüfen: Existiert bereits eine Einweisung für (`mitgliedId`, `kategorieId`)? Falls ja → `EINWEISUNG_BEREITS_VORHANDEN` (409) mit Daten der bestehenden Einweisung.
+. Einweisung anlegen: UUID generieren, `mitglied_id`, `kategorie_id`, `datum` (Eingabe oder heutiges Datum), `dokumentiert_von` aus Header `X-Role` persistieren.
+. Response mit HTTP 201 und der neuen Einweisungsrepräsentation zurückgeben.
+
+===== Ausgabe
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Feld |Beschreibung
+
+.5+|`201 Created`
+|`id`
+|UUID der neu angelegten Einweisung
+
+|`mitgliedId`
+|Mitglieds-ID
+
+|`kategorieId`
+|Kategorie-ID
+
+|`datum`
+|Datum der Einweisung (ISO 8601)
+
+|`dokumentiertVon`
+|Wart-ID aus dem Header `X-Role`
+|===
+
+Beispiel-Response-Body (HTTP 201):
+
+[source,json]
+----
+{
+  "id":              "e7a3f2c1-84b0-4d9e-a6f1-2b8c3d0e5f7a",
+  "mitgliedId":      "M-0815",
+  "kategorieId":     "CAT-kettensaege",
+  "datum":           "2026-08-24",
+  "dokumentiertVon": "wart"
+}
+----
+
+Beispiel-Response-Body (HTTP 409 — bereits vorhanden):
+
+[source,json]
+----
+{
+  "fehlercode":   "EINWEISUNG_BEREITS_VORHANDEN",
+  "meldung":      "Für Mitglied M-0815 liegt bereits eine dokumentierte Einweisung für Kategorie CAT-kettensaege vor.",
+  "einweisung": {
+    "id":              "a1b2c3d4-0000-0000-0000-e5f6a7b8c9d0",
+    "mitgliedId":      "M-0815",
+    "kategorieId":     "CAT-kettensaege",
+    "datum":           "2026-03-15",
+    "dokumentiertVon": "wart"
+  }
+}
+----
+
+===== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`UNGÜLTIGES_DATUM`
+|`datum` ist kein gültiges ISO-8601-Datum oder liegt in der Zukunft
+
+|`400 Bad Request`
+|`EINGABE_UNVOLLSTAENDIG`
+|`mitgliedId` oder `kategorieId` fehlt oder ist leer
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` fehlt oder ist nicht `wart`
+
+|`404 Not Found`
+|`MITGLIED_NICHT_GEFUNDEN`
+|Kein Mitglied mit der angegebenen Mitglieds-ID
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Keine Kategorie mit der angegebenen Kategorie-ID
+
+|`409 Conflict`
+|`EINWEISUNG_BEREITS_VORHANDEN`
+|Für dieses Mitglied existiert bereits eine Einweisung für diese Kategorie
+
+|`422 Unprocessable Entity`
+|`KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG`
+|Die Kategorie erfordert keine Einweisung (BR-02)
+|===
+
+Fehler-Response-Body (einheitliches Format):
+
+[source,json]
+----
+{
+  "fehlercode": "KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG",
+  "meldung":    "Die Kategorie CAT-bohrmaschine ist nicht einweisungspflichtig. Eine Einweisung ist nicht erforderlich.",
+  "kontext": {
+    "kategorieId": "CAT-bohrmaschine"
+  }
+}
+----
+
+---
+
+==== GET /einweisungen
+
+Dieser Endpunkt gibt eine gefilterte Liste von Einweisungen zurück.
+Er dient der Prüfung durch den Thekendienst (z. B. im Kontext von UC-01 BR-08) und dem Wart.
+Beide Rollen (`wart`, `thekendienst`) dürfen ihn aufrufen.
+
+===== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`mitglied_id`
+|Query-Parameter (string)
+|nein
+|Filtert nach Mitglieds-ID. Wird üblicherweise zusammen mit `kategorie_id` verwendet.
+
+|`kategorie_id`
+|Query-Parameter (string)
+|nein
+|Filtert nach Kategorie-ID.
+|===
+
+Mindestens ein Parameter muss angegeben werden, damit die Anfrage verarbeitbar ist.
+
+HTTP-Header:
+
+[source]
+----
+X-Role: wart
+----
+
+Beispiel-Request:
+
+[source]
+----
+GET /einweisungen?mitglied_id=M-0815&kategorie_id=CAT-kettensaege
+X-Role: wart
+----
+
+===== Verarbeitung
+
+. Prüfen, ob mindestens ein Query-Parameter angegeben wurde. Fehlt beides → `FILTER_FEHLT` (400).
+. Falls `mitglied_id` angegeben: Mitglied auf Existenz prüfen. Nicht gefunden → `MITGLIED_NICHT_GEFUNDEN` (404).
+. Falls `kategorie_id` angegeben: Kategorie auf Existenz prüfen. Nicht gefunden → `KATEGORIE_NICHT_GEFUNDEN` (404).
+. Einweisungen anhand der angegebenen Filter laden und zurückgeben.
+
+===== Ausgabe — HTTP 200
+
+[source,json]
+----
+{
+  "einweisungen": [
+    {
+      "id":              "e7a3f2c1-84b0-4d9e-a6f1-2b8c3d0e5f7a",
+      "mitgliedId":      "M-0815",
+      "kategorieId":     "CAT-kettensaege",
+      "datum":           "2026-08-24",
+      "dokumentiertVon": "wart"
+    }
+  ]
+}
+----
+
+Leere Liste, wenn keine Einweisung gefunden (kein 404):
+
+[source,json]
+----
+{
+  "einweisungen": []
+}
+----
+
+===== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`FILTER_FEHLT`
+|Weder `mitglied_id` noch `kategorie_id` wurde angegeben
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` fehlt oder ist weder `wart` noch `thekendienst`
+
+|`404 Not Found`
+|`MITGLIED_NICHT_GEFUNDEN`
+|Kein Mitglied mit der angegebenen Mitglieds-ID
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Keine Kategorie mit der angegebenen Kategorie-ID
+|===
+
+---
+
+==== DELETE /einweisungen/{id} — nicht implementiert
+
+Einweisungen sind dauerhaft.
+Ein DELETE-Endpunkt wird bewusst nicht implementiert.
+Jeder Aufruf auf `/einweisungen/{id}` mit der Methode `DELETE` gibt HTTP 405 Method Not Allowed zurück.
+
+[source,json]
+----
+{
+  "fehlercode": "METHODE_NICHT_ERLAUBT",
+  "meldung":    "Einweisungen können nicht gelöscht werden. Sie sind dauerhaft."
+}
+----
+
+---
+
+=== CLI
+
+==== leihgut einweisung dokumentieren
+
+[source,shell]
+----
+leihgut einweisung dokumentieren \
+  --mitglied-id <id> \
+  --kategorie-id <id> \
+  [--datum <YYYY-MM-DD>]
+----
+
+[cols="1,1,1,3"]
+|===
+|Option |Typ |Pflicht |Beschreibung
+
+|`--mitglied-id`
+|string
+|ja
+|Mitglieds-ID des einzuweisenden Mitglieds
+
+|`--kategorie-id`
+|string
+|ja
+|Kategorie-ID der einweisungspflichtigen Kategorie
+
+|`--datum`
+|string (ISO 8601)
+|nein
+|Datum der Einweisung; fehlt die Option, wird das aktuelle Datum verwendet
+|===
+
+Die Rolle wird implizit als `wart` angenommen (CLI ist ausschließlich für den Wart vorgesehen).
+Ein abweichendes `--role`-Flag gibt HTTP 403 zurück.
+
+===== Beispielaufruf — Erfolg
+
+[source,shell]
+----
+leihgut einweisung dokumentieren --mitglied-id M-0815 --kategorie-id CAT-kettensaege
+----
+
+Ausgabe:
+
+[source]
+----
+Einweisung dokumentiert.
+  ID:            e7a3f2c1-84b0-4d9e-a6f1-2b8c3d0e5f7a
+  Mitglied:      M-0815
+  Kategorie:     CAT-kettensaege
+  Datum:         2026-08-24
+  Dokumentiert:  wart
+----
+
+===== Beispielaufruf — bereits vorhanden
+
+[source,shell]
+----
+leihgut einweisung dokumentieren --mitglied-id M-0815 --kategorie-id CAT-kettensaege
+----
+
+Ausgabe:
+
+[source]
+----
+Hinweis: Einweisung bereits vorhanden (ID: a1b2c3d4-0000-0000-0000-e5f6a7b8c9d0, Datum: 2026-03-15).
+Keine neue Einweisung angelegt.
+----
+
+Exitcode: `1` (Fehler/Konflikt), damit Skripte unterscheiden können, ob eine neue Einweisung angelegt wurde.
+
+===== Fehlerfälle (CLI)
+
+[cols="1,1,3"]
+|===
+|Exitcode |Ursache |Ausgabe (stderr)
+
+|`1`
+|Pflichtparameter fehlt
+|`Fehler: --mitglied-id und --kategorie-id sind erforderlich.`
+
+|`1`
+|Mitglied nicht gefunden
+|`Fehler: Kein Mitglied mit ID "<id>" gefunden.`
+
+|`1`
+|Kategorie nicht gefunden
+|`Fehler: Keine Kategorie mit ID "<id>" gefunden.`
+
+|`1`
+|Kategorie nicht einweisungspflichtig
+|`Hinweis: Kategorie "<id>" ist nicht einweisungspflichtig. Einweisung nicht erforderlich.`
+
+|`1`
+|Einweisung bereits vorhanden
+|`Hinweis: Einweisung bereits vorhanden (ID: ..., Datum: ...). Keine neue Einweisung angelegt.`
+|===
+
+---
+
+== Aktivitätsdiagramm (PlantUML)
+
+[plantuml, uc09-aktivitaet, svg]
+----
+@startuml UC-09 Einweisung dokumentieren
+skinparam defaultFontName monospaced
+skinparam swimlaneWidth 260
+
+|Wart (Rolf)|
+start
+:Mitglied körperlich eingewiesen;
+:leihgut einweisung dokumentieren\n--mitglied-id <id> --kategorie-id <id>\n[--datum <YYYY-MM-DD>]\nbzw. POST /einweisungen senden;
+
+|System|
+:Eingabe validieren\n(mitgliedId, kategorieId, datum);
+if (Eingabe vollständig\nund datum gültig?) then (nein)
+  :HTTP 400\nEINGABE_UNVOLLSTAENDIG\noder UNGÜLTIGES_DATUM;
+  stop
+endif
+
+:Mitglied laden;
+if (Mitglied gefunden?) then (nein)
+  :HTTP 404\nMITGLIED_NICHT_GEFUNDEN;
+  stop
+endif
+
+:Kategorie laden;
+if (Kategorie gefunden?) then (nein)
+  :HTTP 404\nKATEGORIE_NICHT_GEFUNDEN;
+  stop
+endif
+
+if (Kategorie einweisungspflichtig?\n[BR-02]) then (nein)
+  :HTTP 422\nKATEGORIE_NICHT_EINWEISUNGSPFLICHTIG;
+  stop
+endif
+
+if (Einweisung für\n(mitgliedId, kategorieId)\nbereits vorhanden?) then (ja)
+  :HTTP 409\nEINWEISUNG_BEREITS_VORHANDEN\nmit bestehender Einweisungs-ID und Datum;
+  stop
+endif
+
+:Einweisung anlegen\n(UUID, mitgliedId, kategorieId,\ndatum, dokumentiertVon);
+:HTTP 201\nEinweisungsrepräsentation zurückgeben;
+
+|Wart (Rolf)|
+:Bestätigung prüfen\n(ID, Datum, Kategorie, Mitglied);
+:Mitglied darf ab sofort\nGegenstände dieser Kategorie ausleihen\n[BR-08];
+stop
+
+@enduml
+----
+
+---
+
+== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-09 Einweisung dokumentieren
+
+  Grundlage:
+    Gegeben sei eine Kategorie "CAT-kettensaege" mit Bezeichnung "Kettensäge"
+      Und die Kategorie "CAT-kettensaege" ist einweisungspflichtig
+      Und ein Mitglied "M-0815" existiert im System
+      Und das aktuelle Datum ist "2026-08-24"
+
+  # ── Erfolgsfall ──────────────────────────────────────────────────────────────
+
+  Szenario: Einweisung erfolgreich dokumentieren (UC-09, BR-02, BR-08)
+    Gegeben sei für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815" und kategorieId "CAT-kettensaege"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält ein Feld "id" mit einer UUID
+      Und die Antwort enthält "mitgliedId" "M-0815"
+      Und die Antwort enthält "kategorieId" "CAT-kettensaege"
+      Und die Antwort enthält "datum" "2026-08-24"
+      Und die Antwort enthält "dokumentiertVon" "wart"
+
+  Szenario: Einweisung mit explizitem Datum dokumentieren
+    Gegeben sei für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815", kategorieId "CAT-kettensaege" und datum "2026-08-20"
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "datum" "2026-08-20"
+
+  # ── Verknüpfung zu UC-01 (BR-08) ─────────────────────────────────────────────
+
+  Szenario: Mitglied kann nach dokumentierter Einweisung einweisungspflichtiges Gerät ausleihen (BR-08)
+    Gegeben sei ein Gegenstand "INV-00050" der Kategorie "CAT-kettensaege" mit Zustand "verfügbar"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+      Und für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815" und kategorieId "CAT-kettensaege"
+      Und der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00050" und mitgliedId "M-0815"
+    Dann antwortet das System auf die Ausleihe mit HTTP 201
+      Und der Gegenstand "INV-00050" hat den Zustand "ausgeliehen"
+
+  Szenario: Mitglied ohne Einweisung kann einweisungspflichtiges Gerät nicht ausleihen — Negativtest (BR-08)
+    Gegeben sei ein Gegenstand "INV-00050" der Kategorie "CAT-kettensaege" mit Zustand "verfügbar"
+      Und das Mitglied "M-0815" ist nicht gesperrt und hat 0 aktive Ausleihen
+      Und für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Thekendienst POST /ausleihen sendet mit gegenstandId "INV-00050" und mitgliedId "M-0815"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "EINWEISUNG_FEHLT"
+      Und der Gegenstand "INV-00050" hat weiterhin den Zustand "verfügbar"
+
+  # ── Idempotenz: Doppelte Einweisung ──────────────────────────────────────────
+
+  Szenario: Doppelte Einweisung führt zu 409 mit bestehender Einweisung (Idempotenz)
+    Gegeben sei für Mitglied "M-0815" liegt bereits eine Einweisung "EIN-0001" für Kategorie "CAT-kettensaege" vom "2026-03-15" vor
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815" und kategorieId "CAT-kettensaege"
+    Dann antwortet das System mit HTTP 409
+      Und der Fehlercode lautet "EINWEISUNG_BEREITS_VORHANDEN"
+      Und die Antwort enthält im Feld "einweisung.id" den Wert "EIN-0001"
+      Und die Antwort enthält im Feld "einweisung.datum" den Wert "2026-03-15"
+      Und keine neue Einweisung wurde im System angelegt
+
+  # ── Kategorie nicht einweisungspflichtig ─────────────────────────────────────
+
+  Szenario: Einweisung für nicht einweisungspflichtige Kategorie wird abgewiesen (BR-02)
+    Gegeben sei eine Kategorie "CAT-bohrmaschine" mit Bezeichnung "Bohrmaschine"
+      Und die Kategorie "CAT-bohrmaschine" ist nicht einweisungspflichtig
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815" und kategorieId "CAT-bohrmaschine"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG"
+      Und keine Einweisung wurde im System angelegt
+
+  # ── Nicht gefunden ────────────────────────────────────────────────────────────
+
+  Szenario: Mitglied nicht gefunden
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-UNBEKANNT" und kategorieId "CAT-kettensaege"
+    Dann antwortet das System mit HTTP 404
+      Und der Fehlercode lautet "MITGLIED_NICHT_GEFUNDEN"
+
+  Szenario: Kategorie nicht gefunden
+    Wenn der Wart POST /einweisungen sendet mit mitgliedId "M-0815" und kategorieId "CAT-UNBEKANNT"
+    Dann antwortet das System mit HTTP 404
+      Und der Fehlercode lautet "KATEGORIE_NICHT_GEFUNDEN"
+
+  # ── Abfrage ───────────────────────────────────────────────────────────────────
+
+  Szenario: Einweisung per GET abfragen — vorhanden
+    Gegeben sei für Mitglied "M-0815" liegt eine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart GET /einweisungen?mitglied_id=M-0815&kategorie_id=CAT-kettensaege aufruft
+    Dann antwortet das System mit HTTP 200
+      Und die Antwort enthält eine Einweisung mit mitgliedId "M-0815" und kategorieId "CAT-kettensaege"
+
+  Szenario: Einweisung per GET abfragen — nicht vorhanden ergibt leere Liste
+    Gegeben sei für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart GET /einweisungen?mitglied_id=M-0815&kategorie_id=CAT-kettensaege aufruft
+    Dann antwortet das System mit HTTP 200
+      Und die Antwort enthält eine leere Liste "einweisungen"
+
+  # ── Löschen verboten ─────────────────────────────────────────────────────────
+
+  Szenario: Einweisung kann nicht gelöscht werden
+    Gegeben sei für Mitglied "M-0815" liegt eine Einweisung "EIN-0001" für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart DELETE /einweisungen/EIN-0001 aufruft
+    Dann antwortet das System mit HTTP 405
+      Und der Fehlercode lautet "METHODE_NICHT_ERLAUBT"
+      Und die Einweisung "EIN-0001" existiert weiterhin im System
+
+  # ── Rollenprüfung ─────────────────────────────────────────────────────────────
+
+  Szenario: Aufruf durch falsche Rolle wird abgelehnt
+    Wenn ein Aufrufer POST /einweisungen sendet mit X-Role "thekendienst"
+    Dann antwortet das System mit HTTP 403
+      Und der Fehlercode lautet "ROLLE_UNZULAESSIG"
+
+  # ── CLI ───────────────────────────────────────────────────────────────────────
+
+  Szenario: Einweisung über CLI erfolgreich dokumentieren
+    Gegeben sei für Mitglied "M-0815" liegt keine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart "leihgut einweisung dokumentieren --mitglied-id M-0815 --kategorie-id CAT-kettensaege" ausführt
+    Dann endet der Prozess mit Exitcode 0
+      Und die Ausgabe enthält eine Einweisungs-ID
+      Und die Ausgabe enthält "M-0815"
+      Und die Ausgabe enthält "CAT-kettensaege"
+
+  Szenario: CLI meldet bereits vorhandene Einweisung mit Exitcode 1
+    Gegeben sei für Mitglied "M-0815" liegt bereits eine Einweisung für Kategorie "CAT-kettensaege" vor
+    Wenn der Wart "leihgut einweisung dokumentieren --mitglied-id M-0815 --kategorie-id CAT-kettensaege" ausführt
+    Dann endet der Prozess mit Exitcode 1
+      Und die Ausgabe enthält "bereits vorhanden"
+----
+
+---
+
+== EARS-Anforderungen
+
+Diese Anforderungen leiten sich direkt aus den Geschäftsregeln und der Domänenlogik ab.
+Die Syntax folgt dem EARS-Standard (Easy Approach to Requirements Syntax).
+
+=== Einweisung dokumentieren
+
+*EARS-09-01 (BR-02)*
+When [Leihgut] eine Anfrage zum Dokumentieren einer Einweisung erhält und die betreffende Kategorie nicht als einweisungspflichtig markiert ist,
+shall [Leihgut] die Anfrage mit Fehlercode `KATEGORIE_NICHT_EINWEISUNGSPFLICHTIG` (HTTP 422) ablehnen und keine Einweisung anlegen.
+
+*EARS-09-02 (BR-08)*
+When [Leihgut] eine Anfrage zum Dokumentieren einer Einweisung erhält, das Mitglied existiert, die Kategorie existiert, die Kategorie einweisungspflichtig ist und für dieses Mitglied noch keine Einweisung für diese Kategorie vorliegt,
+shall [Leihgut] eine neue Einweisung mit UUID, Mitglieds-ID, Kategorie-ID, Datum und Wart-ID persistieren und mit HTTP 201 bestätigen.
+
+*EARS-09-03 (Idempotenz)*
+When [Leihgut] eine Anfrage zum Dokumentieren einer Einweisung erhält und für das Mitglied bereits eine Einweisung für diese Kategorie existiert,
+shall [Leihgut] keine neue Einweisung anlegen und mit HTTP 409 sowie den Daten der bestehenden Einweisung antworten.
+
+*EARS-09-04 (Unveränderlichkeit)*
+[Leihgut] shall zu keinem Zeitpunkt das Löschen einer Einweisung ermöglichen.
+Jeder Aufruf von `DELETE /einweisungen/{id}` shall mit HTTP 405 Method Not Allowed beantwortet werden.
+
+=== Abfrage
+
+*EARS-09-05*
+When [Leihgut] eine Abfrage auf `GET /einweisungen` mit mindestens einem der Parameter `mitglied_id` oder `kategorie_id` erhält,
+shall [Leihgut] alle Einweisungen zurückgeben, die den angegebenen Filtern entsprechen; eine leere Liste ist ein gültiges Ergebnis (kein 404).
+
+*EARS-09-06*
+When [Leihgut] eine Abfrage auf `GET /einweisungen` ohne jeglichen Filterparameter erhält,
+shall [Leihgut] die Anfrage mit Fehlercode `FILTER_FEHLT` (HTTP 400) ablehnen.
+
+=== Einweisung als Ausgabebedingung
+
+*EARS-09-07 (BR-08)*
+When [Leihgut] eine Ausgabeanforderung für einen Gegenstand einer einweisungspflichtigen Kategorie erhält und für das anfragende Mitglied keine dokumentierte Einweisung für diese Kategorie vorliegt,
+shall [Leihgut] die Ausgabe mit Fehlercode `EINWEISUNG_FEHLT` (HTTP 422) verweigern, unabhängig vom Zustand des Gegenstands oder der Mitgliedschaft.
+
+*EARS-09-08 (BR-08)*
+When [Leihgut] eine Ausgabeanforderung für einen Gegenstand einer einweisungspflichtigen Kategorie erhält und für das anfragende Mitglied eine dokumentierte Einweisung für diese Kategorie vorliegt,
+shall [Leihgut] die Einweisungsbedingung als erfüllt bewerten und die übrigen Ausgabebedingungen prüfen.
+
+=== Rollenkontrolle
+
+*EARS-09-09*
+When [Leihgut] eine Anfrage auf `POST /einweisungen` erhält und der Header `X-Role` nicht den Wert `wart` enthält,
+shall [Leihgut] die Anfrage mit HTTP 403 und Fehlercode `ROLLE_UNZULAESSIG` ablehnen.
+
+=== Datum
+
+*EARS-09-10*
+When [Leihgut] eine Einweisung dokumentiert und kein `datum`-Feld im Request-Body enthalten ist,
+shall [Leihgut] das aktuelle Datum aus der austauschbaren Datumsquelle als Einweisungsdatum verwenden.
+
+*EARS-09-11*
+When [Leihgut] eine Einweisung dokumentiert und das `datum`-Feld ein gültiges ISO-8601-Datum enthält, das nicht in der Zukunft liegt,
+shall [Leihgut] dieses Datum als Einweisungsdatum übernehmen.
