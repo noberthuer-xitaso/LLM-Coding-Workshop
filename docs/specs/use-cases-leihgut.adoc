@@ -1,0 +1,695 @@
+= Specification: Leihgut
+:toc: left
+:toclevels: 3
+:icons: font
+:revdate: 2026-08-24
+
+== Actors
+
+[cols="1,2,3"]
+|===
+| Actor | Role identifier | Permitted operations
+
+| Counter staff
+| `thekendienst`
+| Check out items (UC-01), extend loans (UC-02), take back items (UC-03).
+
+| Member
+| `mitglied`
+| Place reservations (UC-05r), query availability (UC-10).
+
+| Workshop manager
+| `wart`
+| Close inspections (UC-04), finish maintenance (UC-05m), record trainings (UC-07), revoke trainings (UC-08), manage catalogue (UC-09).
+
+| Administrator
+| `admin`
+| Manage audit-log retention (UC-Maint).
+|===
+
+[`src/leihgut/adapters/rest/app.py:270-274`, `src/leihgut/adapters/rest/rollen.py:13-27`, `src/leihgut/adapters/rest/app.py:541-561`]
+
+---
+
+== Persona Use Cases (Cockburn Fully Dressed)
+
+=== UC-01 Gegenstand ausgeben (Check Out an Item)
+
+*Primary Actor:* Counter staff (Karim)
+
+*Trigger:* A member presents an item for borrowing.
+
+*Stakeholders & Interests:*
+
+* Counter staff — needs an instant yes/no decision.
+* Member — wants the item now.
+* Organisation — wants the deposit captured correctly and the loan traceable.
+
+*Preconditions:*
+
+* The item exists in the catalogue.
+* The item is in state `verfuegbar` or `reserviert` (for this member).
+* The member has no more than 2 other active loans.
+* The member has no overdue loan.
+* If the item's category requires training, the member holds a valid `Einweisung`.
+
+*Main Success Scenario:*
+
+. Counter staff submits checkout request (member ID, item ID, counter staff ID).
+. System verifies all preconditions.
+. System records the deposit at the current catalogue value (snapshot, not recomputed later).
+. System sets the item state to `ausgeliehen`.
+. System creates an `Ausleihe` with state `aktiv`.
+. System writes two audit log entries in the same transaction.
+. System returns the new loan with deposit amount.
+
+*Extensions:*
+
+* 2a. Item is `reserviert` but not for this member → reject with `GegenstandReserviert`.
+* 2b. Member already has 3 active loans → reject with `AusleiheLimitErreicht`.
+* 2c. Member has an overdue loan → reject with `MitgliedGesperrt`.
+* 2d. Category requires training, member has none → reject with `EinweisungFehlt`.
+* 2e. Concurrent checkout of the same item by another process → reject with `NebenlaeufigeAusgabeAbgelehnt` (HTTP 409); enforced by `BEGIN IMMEDIATE` + partial unique index.
+
+*Postconditions:*
+
+* An `Ausleihe` record exists with state `aktiv`, deposit snapshot, and timestamps.
+* Item state is `ausgeliehen`.
+* Two audit entries are written and immutable.
+
+*Business Rules:* BR-AUS-01, BR-AUS-02, BR-AUS-03, BR-AUS-04, BR-AUS-05.
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:144-246`]
+
+---
+
+=== UC-02 Ausleihe verlängern (Extend a Loan)
+
+*Primary Actor:* Counter staff
+
+*Trigger:* Member requests an extension before the due date.
+
+*Preconditions:*
+
+* Loan exists and is `aktiv`.
+* Loan has not been extended before.
+* Loan is not overdue.
+
+*Main Success Scenario:*
+
+. Counter staff submits extension request (loan ID, new due date).
+. System verifies preconditions.
+. System updates the loan's due date and marks the extension flag.
+. System writes an audit entry.
+
+*Extensions:*
+
+* 2a. Loan already extended → reject with `BereitsVerlaengert`.
+* 2b. Loan is overdue → reject with `AusleiheUeberfaellig`.
+* 2c. Open reservation exists for this category — _check currently deferred (see Known Gaps)_.
+
+*Business Rules:* BR-AUS-06, BR-AUS-07.
+
+[`src/leihgut/anwendungskern/verlaengerung_service.py:102`]
+
+---
+
+=== UC-03 Gegenstand zurücknehmen (Return an Item)
+
+*Primary Actor:* Counter staff
+
+*Trigger:* Member returns a borrowed item at the counter.
+
+*Preconditions:*
+
+* Loan exists and is `aktiv`.
+
+*Main Success Scenario:*
+
+. Counter staff submits return (loan ID).
+. System sets loan state to `zurueckgegeben`.
+. System sets item state to `in_pruefung`.
+. System auto-cancels the first open reservation for the item's category (FIFO).
+. System writes two audit entries in the same transaction.
+. System notifies counter staff that inspection is pending.
+
+*Postconditions:*
+
+* Loan is `zurueckgegeben`; item is `in_pruefung`.
+* First reservation in queue (if any) is `automatisch_abgesagt`.
+
+*Business Rules:* BR-RUP-01, BR-VOR-02.
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:251-314`, `src/leihgut/anwendungskern/vormerkung_service.py:121-147`]
+
+---
+
+=== UC-04 Prüfung abschließen (Close Inspection)
+
+*Primary Actor:* Workshop manager (Rolf)
+
+*Trigger:* Returned item has been inspected.
+
+*Preconditions:*
+
+* Loan is `zurueckgegeben`.
+* Item is `in_pruefung`.
+* Requested deposit deduction ≤ deposited amount.
+
+*Main Success Scenario:*
+
+. Rolf submits inspection result (loan ID, damage list, deposit deduction).
+. System deduplicates damage entries by exact description per item.
+. System increments the item's usage counter.
+. System determines next item state: `wartungsfaellig` if counter ≥ interval, else `verfuegbar` (or `reserviert` if queue exists).
+. System executes one atomic `BEGIN IMMEDIATE` transaction writing: loan close, item state, inspection report, damage entries, deposit movement(s), audit entry.
+
+*Extensions:*
+
+* 2a. Deduction > deposited amount → reject with `KautionsAbzugZuHoch`.
+* 4a. After maintenance threshold reached → item state `wartungsfaellig`.
+* 4b. After maintenance threshold reached AND open reservation → item state stays `wartungsfaellig` (maintenance comes first).
+
+*Postconditions:*
+
+* Loan is `abgeschlossen`; item is in new state.
+* Deposit movement is recorded (if deduction > 0: `SCHADENSABZUG`; remainder: `RUECKZAHLUNG`).
+
+*Business Rules:* BR-RUP-04, BR-RUP-05, BR-WAR-01, BR-WAR-02, BR-KAU-02.
+
+[`src/leihgut/anwendungskern/pruefung_service.py:100-230`, `src/leihgut/adapters/persistence/sqlite_pruefabschluss_repository.py:21-101`]
+
+---
+
+=== UC-05r Vormerkung erfassen (Place a Reservation)
+
+*Primary Actor:* Member (Sabine)
+
+*Trigger:* Member requests to be notified when a category of item becomes available.
+
+*Preconditions:*
+
+* Member has no open reservation for the same category.
+* Member is not blocked — _check currently a stub; see Known Gaps_.
+
+*Main Success Scenario:*
+
+. Member submits reservation (member ID, category ID).
+. System verifies uniqueness constraint.
+. System creates `Vormerkung` with state `offen`.
+. System returns reservation ID.
+
+*Business Rules:* BR-VOR-01, BR-VOR-02.
+
+[`src/leihgut/anwendungskern/vormerkung_service.py:59`]
+
+---
+
+=== UC-05m Wartung abschließen (Finish Maintenance)
+
+*Primary Actor:* Workshop manager
+
+*Trigger:* Maintenance work on a `wartungsfaellig` item is complete.
+
+*Preconditions:*
+
+* Item is `wartungsfaellig`.
+
+*Main Success Scenario:*
+
+. Rolf submits maintenance completion (item ID).
+. System resets usage counter to 0.
+. System sets item state to `reserviert` if an open reservation exists, else `verfuegbar`.
+. System writes audit entry.
+
+*Business Rules:* BR-WAR-03, BR-VOR-03.
+
+[`src/leihgut/anwendungskern/wartung_service.py:62`]
+
+---
+
+=== UC-06 Verlust erfassen (Record a Loss)
+
+*Primary Actor:* Counter staff
+
+*Trigger:* A borrowed item has been reported lost.
+
+*Preconditions:*
+
+* Loan is `aktiv`.
+
+*Main Success Scenario:*
+
+. Counter staff submits loss report (loan ID).
+. System executes one atomic `BEGIN IMMEDIATE` transaction:
+  .. Sets loan to `abgeschlossen_verloren`.
+  .. Sets item to `ausgemustert`.
+  .. Inserts `VERLUST_EINZUG` deposit movement (100 % of deposited amount).
+  .. Writes two audit entries.
+
+*Business Rules:* BR-VER-02, BR-VER-03, BR-KAU-03/04.
+
+[`src/leihgut/anwendungskern/verlust_service.py:48-175`]
+
+---
+
+=== UC-07 Einweisung erfassen (Record a Training)
+
+*Primary Actor:* Workshop manager
+
+*Trigger:* A member has completed training for a category that requires it.
+
+*Preconditions:*
+
+* No valid (non-revoked) `Einweisung` exists for this (member, category) pair.
+
+*Main Success Scenario:*
+
+. Rolf submits training record (member ID, category ID, trainer ID, date).
+. System creates `Einweisung` with state valid.
+. System writes audit entry.
+
+*Business Rules:* BR-EIN-01.
+
+[`src/leihgut/anwendungskern/einweisung_service.py:55`]
+
+---
+
+=== UC-08 Einweisung widerrufen (Revoke a Training)
+
+*Primary Actor:* Workshop manager
+
+*Preconditions:*
+
+* `Einweisung` exists and is not already revoked.
+
+*Main Success Scenario:*
+
+. Rolf submits revocation (einweisung ID).
+. System marks `Einweisung` as revoked.
+. System writes audit entry.
+
+*Business Rules:* BR-EIN-02.
+
+[`src/leihgut/anwendungskern/einweisung_service.py:114`]
+
+---
+
+=== UC-09 Katalog verwalten (Manage Catalogue)
+
+*Primary Actor:* Workshop manager
+
+*Operations:* Create category, update category, decommission item, create item.
+
+*Validation Rules (per operation):*
+
+* `leihdauer_tage` > 0. [`src/leihgut/anwendungskern/katalog_service.py:59-68`]
+* `wartungsintervall` > 0. [`src/leihgut/anwendungskern/katalog_service.py:59-68`]
+* `wiederbeschaffungswert_cent` > 0. [`src/leihgut/anwendungskern/katalog_service.py:71-75`]
+* Inventory number (`inventarnummer`) is unique across all items. [`src/leihgut/anwendungskern/katalog_service.py:144`]
+
+*Business Rules:* BR-KAT-01, BR-KAT-02, BR-KAT-03, BR-KAT-04.
+
+[`src/leihgut/anwendungskern/katalog_service.py:80`]
+
+---
+
+=== UC-10 Verfügbarkeit prüfen (Check Availability)
+
+*Primary Actor:* Member (Sabine) or counter staff
+
+*Main Success Scenario:*
+
+. Actor submits availability query (item or category ID).
+. System returns current item states.
+
+[`src/leihgut/anwendungskern/verfuegbarkeit_service.py:21`]
+
+---
+
+== System Use Cases (REST Interface)
+
+All routes are defined in [`src/leihgut/adapters/rest/app.py:276-585`].
+Request DTOs are Pydantic models in [`src/leihgut/adapters/rest/schemas.py:8-63`].
+Error→HTTP mapping tables are in [`src/leihgut/adapters/rest/app.py:127-230`].
+Role enforcement uses the `X-Rolle` header; the value is not cryptographically verified.
+
+[cols="2,1,1,1,3"]
+|===
+| Endpoint | Method | Required role | Success | Error HTTP codes
+
+| `POST /ausleihen`
+| POST
+| `thekendienst`
+| 201
+| 404 item/member not found, 409 concurrent checkout or item blocked, 422 validation, 403 wrong role
+
+| `POST /ausleihen/{id}/verlaengern`
+| POST
+| `thekendienst`
+| 200
+| 404 loan not found, 409 already extended or overdue, 422 validation
+
+| `POST /ausleihen/{id}/ruecknahme`
+| POST
+| `thekendienst`
+| 200
+| 404 loan not found, 409 wrong state
+
+| `POST /pruefungen`
+| POST
+| `wart`
+| 201
+| 404, 409 wrong state or deduction too high, 422
+
+| `POST /wartungen/{id}/abschluss`
+| POST
+| `wart`
+| 200
+| 404, 409 wrong state
+
+| `POST /verluste`
+| POST
+| `thekendienst`
+| 201
+| 404, 409
+
+| `POST /einweisungen`
+| POST
+| `wart`
+| 201
+| 409 duplicate training
+
+| `DELETE /einweisungen/{id}`
+| DELETE
+| `wart`
+| 200
+| 404
+
+| `POST /kategorien`
+| POST
+| `wart`
+| 201
+| 422 validation
+
+| `POST /gegenstaende`
+| POST
+| `wart`
+| 201
+| 409 duplicate inventory number, 422
+
+| `POST /vormerkungen`
+| POST
+| `mitglied`
+| 201
+| 409 duplicate reservation
+
+| `GET /verfuegbarkeit/{id}`
+| GET
+| any
+| 200
+| 404
+
+| `POST /admin/audit-log/cleanup`
+| POST
+| `admin`
+| 200
+| 403
+
+| `GET /admin/audit-log/stats`
+| GET
+| `admin`
+| 200
+| 403
+|===
+
+---
+
+== Supplementary Specifications
+
+=== Entity Model
+
+All aggregates and value objects are immutable frozen dataclasses.
+
+[cols="1,1,2,2"]
+|===
+| Type | Class | Fields (key) | File
+
+| Aggregate
+| `Ausleihe`
+| `id`, `gegenstand_id`, `mitglied_id`, `zustand`, `kaution_cent`, `ausgabe_datum`, `faellig_datum`, `verlaengert`
+| `domain/ausleihe.py:14-41`
+
+| Aggregate
+| `Gegenstand`
+| `id`, `inventarnummer`, `kategorie_id`, `zustand`, `nutzungsanzahl`
+| `domain/gegenstand.py:10-31`
+
+| Aggregate
+| `Einweisung`
+| `id`, `mitglied_id`, `kategorie_id`, `widerrufen`
+| `domain/einweisung.py:10-20`
+
+| Aggregate
+| `Vormerkung`
+| `id`, `mitglied_id`, `kategorie_id`, `status`
+| `domain/vormerkung.py:12-29`
+
+| Value object
+| `Kategorie`
+| `id`, `name`, `leihdauer_tage`, `wartungsintervall`, `wiederbeschaffungswert_cent`, `einweisungspflichtig`
+| `domain/kategorie.py:9-16`
+
+| Value object
+| `Pruefprotokoll`
+| `id`, `ausleihe_id`, `erstellt_am`, `abzug_cent`
+| `domain/pruefprotokoll.py:11-18`
+
+| Value object
+| `MaengelEintrag`
+| `id`, `gegenstand_id`, `beschreibung`, `erstellt_am`
+| `domain/maengel.py:11-16`
+
+| Value object
+| `Kautionsbewegung`
+| `id`, `ausleihe_id`, `typ` (HINTERLEGUNG / SCHADENSABZUG / RUECKZAHLUNG / VERLUST_EINZUG), `betrag_cent`, `erstellt_am`
+| `domain/kautionsbewegung.py:14-28`
+
+| Value object
+| `AuditLogEintrag`
+| `id`, `ereignis_typ`, `entitaet_typ`, `entitaet_id`, `nutzer_id`, `erstellt_am`, `details_json`
+| `domain/audit_log.py:12-20`
+|===
+
+*Note:* `HINTERLEGUNG` (initial deposit ledger entry at checkout) is defined but not yet written in any service. [`src/leihgut/domain/kautionsbewegung.py:14-15`]
+
+Member identity is an opaque `mitglied_id` string; there is no members table and no FK constraint to it.
+[`src/leihgut/adapters/persistence/schema.sql:61-65`]
+
+=== State Machines
+
+==== Ausleihe
+
+----
+aktiv ──────────────────────► zurueckgegeben ──► abgeschlossen
+  │                            (after UC-03)       (after UC-04)
+  └──────────────────────────────────────────────► abgeschlossen_verloren
+                                                    (after UC-06)
+----
+
+[`domain/ausleihe.py:14-18`]
+
+==== Gegenstand
+
+----
+                  ┌── UC-04 (no maintenance due) ──────────────────────────┐
+verfuegbar ──UC-01──► ausgeliehen ──UC-03──► in_pruefung ──UC-04 (maint)──► wartungsfaellig
+     ▲                                                                              │
+     └────────────────────────────── UC-05m ────────────────────────────────────────┘
+     
+reserviert ──UC-01 (for this member)──► ausgeliehen ...
+ausgemustert  (terminal — after UC-06)
+----
+
+[`domain/gegenstand.py:10-19`]
+
+==== Vormerkung
+
+----
+offen ──(on item return, first in queue)──► automatisch_abgesagt
+offen ──(manual cancellation)─────────────► manuell_abgesagt
+----
+
+[`domain/vormerkung.py:12-15`]
+
+=== Validation Rules
+
+[cols="1,3,2"]
+|===
+| Rule ID | Constraint | Evidence
+
+| BR-AUS-01
+| Checkout requires item `verfuegbar` or (`reserviert` AND for this member)
+| `anwendungskern/ausleihe_service.py:107-130`
+
+| BR-AUS-02
+| Max 3 active loans per member
+| `anwendungskern/ausleihe_service.py:31`, `:135`
+
+| BR-AUS-03
+| Overdue loan blocks member
+| `anwendungskern/ausleihe_service.py:133-134`
+
+| BR-AUS-04
+| Training required for `einweisungspflichtig` categories
+| `anwendungskern/ausleihe_service.py:137-138`
+
+| BR-AUS-05
+| Deposit is snapshot at checkout
+| `anwendungskern/ausleihe_service.py:194`
+
+| BR-AUS-06
+| One extension per loan
+| `anwendungskern/verlaengerung_service.py:138`
+
+| BR-AUS-07
+| Overdue loans cannot be extended
+| `anwendungskern/verlaengerung_service.py:125`
+
+| BR-KAT-01
+| Unique inventory numbers
+| `anwendungskern/katalog_service.py:144`
+
+| BR-KAT-02
+| `leihdauer_tage` and `wartungsintervall` > 0
+| `anwendungskern/katalog_service.py:59-68`
+
+| BR-KAT-03
+| `wiederbeschaffungswert_cent` > 0
+| `anwendungskern/katalog_service.py:71-75`
+
+| BR-KAT-04
+| Deposit = 20 % of replacement value, rounded to whole euros, bounded [€5, €100]
+| `domain/kaution.py:7-20`
+
+| BR-EIN-01
+| One valid training per (member, category)
+| `anwendungskern/einweisung_service.py:74-79`, `schema.sql:76-78`
+
+| BR-EIN-02
+| Training valid until explicitly revoked
+| `domain/einweisung.py:18-20`
+
+| BR-VOR-01
+| One open reservation per (member, category)
+| `anwendungskern/vormerkung_service.py:85-90`, `schema.sql:160-162`
+
+| BR-VOR-02
+| FIFO queue; auto-cancel first on return
+| `anwendungskern/vormerkung_service.py:51-53`, `:121-147`
+
+| BR-VOR-03
+| After maintenance: `RESERVIERT` if queue exists, else `VERFUEGBAR`
+| `anwendungskern/wartung_service.py:97-110`
+
+| BR-RUP-01
+| Return sets item to `in_pruefung`
+| `anwendungskern/ausleihe_service.py:285`
+
+| BR-RUP-04
+| Inspection close sets loan to `abgeschlossen`
+| `anwendungskern/pruefung_service.py:193`
+
+| BR-RUP-05
+| Damage deduplication by exact description per item
+| `anwendungskern/pruefung_service.py:132-145`
+
+| BR-WAR-01
+| Increment usage counter on inspection close
+| `anwendungskern/pruefung_service.py:148`
+
+| BR-WAR-02
+| `wartungsfaellig` if counter ≥ `wartungsintervall`
+| `anwendungskern/pruefung_service.py:83-95`
+
+| BR-WAR-03
+| Reset counter to 0 after maintenance
+| `anwendungskern/wartung_service.py:118`
+
+| BR-KAU-02
+| Deposit deduction ≤ deposited amount
+| `anwendungskern/pruefung_service.py:78`
+
+| BR-KAU-03/04
+| Loss → 100 % deposit seizure
+| `anwendungskern/verlust_service.py:124-132`
+
+| BR-VER-02
+| Only active loans can be declared lost
+| `anwendungskern/verlust_service.py:74-76`
+
+| BR-VER-03
+| Lost item → `ausgemustert`
+| `anwendungskern/verlust_service.py:111-122`
+
+| BR-SPE-02
+| Any overdue loan makes member `gesperrt`
+| `anwendungskern/ausleihe_service.py:162-163`
+|===
+
+=== Interface Contracts
+
+==== Time
+
+All time reads go through `Clock.jetzt()`, which returns an ISO-8601 string.
+[`src/leihgut/ports/clock.py:14-18`]
+
+==== Deposit Calculation
+
+`kaution_berechnen(wiederbeschaffungswert_cent: int) -> int`
+
+* Input: replacement value in cents (integer > 0).
+* Processing: `round(value * 0.2 / 100) * 100`.
+* Output: always a multiple of 100 cents; bounded to [500, 10 000].
+* This is the only place in the codebase where deposit amount is computed.
+
+[`domain/kaution.py:7-20`]
+
+---
+
+== Known Gaps
+
+The following items are explicitly deferred in the code and cannot be specified until the corresponding EPIC is implemented:
+
+* *Extension blocks reservation* — BR-AUS-07 check for `VormerkungOffen` is commented out with `# UNCOMMENT mit EPIC-E` in [`src/leihgut/anwendungskern/verlaengerung_service.py:128-131`].
+* *Member block list in reservation* — the REST adapter passes `gesperrte_mitglieder=[]` as a stub [`src/leihgut/adapters/rest/app.py:400-407`].
+* *Initial deposit ledger entry* — `HINTERLEGUNG` movement type defined but never written [`src/leihgut/domain/kautionsbewegung.py:14-15`].
+
+---
+
+== Acceptance Criteria
+
+Acceptance criteria are encoded as pytest tests tagged with UC-ID and BR-ID comments, not as standalone Gherkin files.
+[`tests/test_epic_a_ausleihe.py:155-221`, `tests/test_epic_b_pruefung_kaution.py:1-377`, `tests/test_epic_c_einweisung.py:86-307`, `tests/test_epic_d_katalog.py:1-320`, `tests/test_epic_e_vormerkung.py:69-311`, `tests/test_epic_f_verlust.py:109-348`, `tests/test_epic_g_wartung.py:214-420`, `tests/test_skeleton_01_verfuegbarkeit.py:49-150`, `tests/test_epic_maintenance_audit_retention.py:67-138`]
+
+---
+
+== Glossary
+
+[cols="1,2"]
+|===
+| Term | Meaning
+
+| Ausleihe | Loan agreement [`domain/ausleihe.py:22`]
+| Gegenstand | Equipment item [`domain/gegenstand.py:23`]
+| Kategorie | Equipment category [`domain/kategorie.py:9`]
+| Einweisung | Training certification [`domain/einweisung.py:11`]
+| Vormerkung | Reservation [`domain/vormerkung.py:18`]
+| Kaution | Security deposit [`domain/kaution.py:12`]
+| Kautionsbewegung | Deposit ledger entry [`domain/kautionsbewegung.py:21`]
+| Pruefprotokoll | Inspection report [`domain/pruefprotokoll.py:11`]
+| MaengelEintrag | Damage record [`domain/maengel.py:11`]
+| AuditLogEintrag | Immutable audit entry [`domain/audit_log.py:13`]
+| Thekendienst | Counter staff [`adapters/rest/rollen.py:19`]
+| Wart | Workshop manager [`adapters/rest/rollen.py:19`]
+|===

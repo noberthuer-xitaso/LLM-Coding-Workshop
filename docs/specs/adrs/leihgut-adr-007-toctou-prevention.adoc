@@ -1,0 +1,81 @@
+= ADR-007: TOCTOU-Schutz durch BEGIN IMMEDIATE + partiellen Unique-Index
+:toc: left
+:icons: font
+:revdate: 2026-08-24
+
+== Status
+
+Accepted
+
+== Context
+
+The checkout use case (UC-01) has a TOCTOU (time-of-check / time-of-use) vulnerability: two concurrent requests could both read the item as `verfuegbar`, pass all precondition checks, and both attempt to create an active loan for the same item.
+SQLite's default isolation level does not prevent this.
+
+The constraints are:
+* Single SQLite file (ADR-004); no distributed lock available.
+* The domain rule states that at most one `aktiv` loan may exist per item at any time.
+
+[`src/leihgut/ports/ausleihe_repository.py:7-15`, `src/leihgut/adapters/persistence/schema.sql:55-59`]
+
+== Decision
+
+Two complementary mechanisms enforce the single-active-loan invariant at the database layer:
+
+. *`BEGIN IMMEDIATE`* — acquire a write lock before the first read in the checkout transaction.
+  This prevents any other writer from interleaving between the precondition reads and the insert.
+  [`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`]
+
+. *Partial unique index* — `CREATE UNIQUE INDEX ux_ausleihe_aktiv_je_gegenstand ON ausleihe(gegenstand_id) WHERE zustand = 'aktiv'`.
+  This is the last line of defence: even if a race somehow passes the write lock, the index aborts the second insert with `IntegrityError`, which is caught and translated to `NebenlaeufigeAusgabeAbgelehnt` (HTTP 409).
+  [`src/leihgut/adapters/persistence/schema.sql:55-59`]
+
+[`src/leihgut/ports/ausleihe_repository.py:7-37`]
+
+== Pugh Matrix
+
+Quality goals: Data reliability (+), Functional correctness (+), Maintainability (+), Performance (+).
+
+[cols="2,1,1,1,1,1"]
+|===
+| Alternative | Reliability | Correctness | Maintainability | Performance | Total
+
+| *BEGIN IMMEDIATE + partial unique index (chosen)*
+| +1
+| +1
+| 0
+| 0
+| +2
+
+| Application-level mutex (threading.Lock)
+| +1
+| +1
+| -1
+| -1
+| 0
+
+| Optimistic concurrency (version field + retry)
+| 0
+| 0
+| -1
+| +1
+| 0
+|===
+
+The database-layer approach is the only option that remains correct even if multiple Python threads or processes share the file (which is the case with `check_same_thread=False`).
+Application-level mutexes do not protect across OS processes.
+
+== Consequences
+
+*Positive:*
+
+* The invariant is enforced at the database layer and survives process restarts.
+* The partial index covers only `aktiv` rows, keeping the index small.
+* The `NebenlaeufigeAusgabeAbgelehnt` rejection type makes the race condition observable to the caller.
+
+*Negative:*
+
+* `BEGIN IMMEDIATE` serialises all checkout and loss writes; a long-running write blocks concurrent ones.
+* The schema depends on a SQLite-specific partial index syntax, limiting portability to other databases.
+
+[`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`, `src/leihgut/adapters/persistence/schema.sql:55-59`]

@@ -1,0 +1,73 @@
+= ADR-006: Injizierter Clock-Port für testbare Fristen
+:toc: left
+:icons: font
+:revdate: 2026-08-24
+
+== Status
+
+Accepted
+
+== Context
+
+Several business rules depend on the current date and time:
+loan due-date calculation, overdue detection (BR-AUS-03, BR-AUS-07), and audit-log timestamps.
+If the application reads `datetime.now()` directly, these rules cannot be tested deterministically without manipulating the system clock.
+The architecture constraint states that deadline-dependent logic must be fully testable.
+
+[`src/leihgut/ports/clock.py:1-18`]
+
+== Decision
+
+Introduce a `Clock` port with a single method `jetzt() -> str` (ISO-8601 string).
+The production adapter `SystemClock` wraps `datetime.now(timezone.utc)`.
+In tests, a `FixedClock` or `FakeClock` is injected to set any desired date.
+All time reads in the application kernel go through the injected `Clock`; `datetime.now()` is never called directly in the domain or kernel layers.
+
+[`src/leihgut/ports/clock.py:14-18`, `src/leihgut/adapters/system_clock.py:1-13`]
+
+== Pugh Matrix
+
+Quality goals: Functional correctness (+), Maintainability (+), Testability (+), Operational simplicity (+).
+
+[cols="2,1,1,1,1,1"]
+|===
+| Alternative | Correctness | Maintainability | Testability | Operational simplicity | Total
+
+| *Injectable Clock port (chosen)*
+| +1
+| +1
+| +1
+| 0
+| +3
+
+| `datetime.now()` directly in kernel
+| 0
+| -1
+| -1
+| +1
+| -1
+
+| Freeze-time monkey-patching (test-side only)
+| 0
+| 0
+| +1
+| +1
+| +2
+|===
+
+Monkey-patching avoids a port but couples tests to the module import path and does not prevent production code from bypassing the patch.
+The injectable port makes the dependency explicit and enforces the constraint at the type level.
+
+== Consequences
+
+*Positive:*
+
+* All overdue and deadline tests run with any desired date without touching the system clock.
+* The constraint is enforced by the type system — the kernel function signature makes the clock dependency visible.
+* Swapping to a distributed clock or a mock is one line.
+
+*Negative:*
+
+* Every use-case function that needs time must declare the `Clock` parameter — minor boilerplate.
+
+[`src/leihgut/ports/clock.py:1-18`]

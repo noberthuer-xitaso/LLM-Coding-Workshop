@@ -1,0 +1,425 @@
+= Architecture: Leihgut
+:toc: left
+:toclevels: 3
+:icons: font
+:revdate: 2026-08-24
+
+// arc42 template — Starke / Hruschka
+
+== 1. Introduction and Goals
+
+Leihgut is a digitised lending-management system for a "Bibliothek der Dinge" (library of things) that loans tools and devices to its members.
+It replaces a paper ring-binder and cash deposit process.
+
+The four hard requirements the architecture must satisfy:
+
+. The counter always knows — instantly — whether an item may be issued.
+. Every deposit movement is traceable and tamper-proof.
+. Items due for maintenance are withheld automatically.
+. Reservations are honoured when loans are extended.
+
+[`README.adoc:6-24`, `README.adoc:61-80`]
+
+=== Top Quality Goals
+
+[cols="1,3"]
+|===
+| Characteristic | Scenario
+
+| Functional correctness
+| Every business rule (BR-AUS-01 through BR-SPE-02) has a typed enforcement point and a named test. No rule can be silently bypassed.
+
+| Data reliability
+| All deposit movements and state transitions are written atomically and the audit log is immutable — enforced at the database layer.
+
+| Maintainability
+| Each use-case service is split into a side-effect-free validation function and a separate integration function (IOSP). The REST adapter contains zero business logic.
+|===
+
+Priority ranking is deferred. _The Architect has not yet specified which characteristic wins when trade-offs arise._
+
+=== Stakeholders
+
+[cols="1,2"]
+|===
+| Role | Concern
+
+| Counter staff (Karim)
+| Instant authorisation decision; clear error messages.
+
+| Member (Sabine)
+| Availability query and reservation without visiting the counter.
+
+| Workshop manager (Rolf)
+| Inspection, maintenance, training, and catalogue operations.
+
+| Administrator
+| Audit-log retention.
+|===
+
+[`README.adoc:43-49`]
+
+---
+
+== 2. Architecture Constraints
+
+. Single locally startable process; no external services or cloud infrastructure. [`README.adoc:50-59`]
+. REST API and CLI only; no web UI. [`README.adoc:50-59`]
+. No cryptographic authentication in release 1 — role comes from `X-Rolle` HTTP header, not verified. [`README.adoc:57-58`, `src/leihgut/adapters/rest/rollen.py:1-27`]
+. All time reads must flow through a replaceable `Clock` port so that deadline-dependent logic is fully testable. [`src/leihgut/ports/clock.py:1-18`]
+
+---
+
+== 3. Context and Scope
+
+The entire bounded context lives in the `leihgut` Python package.
+No other package depends on it.
+It calls no external service.
+
+Member identity is an opaque `mitglied_id` string.
+There is no member management use case and no foreign-key constraint to a members table.
+[`src/leihgut/adapters/persistence/schema.sql:61-65`, `src/leihgut/domain/ausleihe.py:25`]
+
+External integrations (member management, payment, export) are deferred.
+_The Architect has not yet specified which external systems must be integrated._
+
+---
+
+== 4. Solution Strategy
+
+The system uses Hexagonal Architecture (Ports & Adapters) with four strict layers:
+
+[cols="1,3,2"]
+|===
+| Layer | Responsibility | Representative file
+
+| Domain
+| Pure frozen dataclasses and pure functions; zero framework imports.
+| `domain/ausleihe.py:14-41`
+
+| Ports
+| `Protocol`/`ABC` interfaces, one per aggregate. The application kernel depends only on these.
+| `ports/ausleihe_repository.py:1-44`
+
+| Application kernel
+| Use-case functions receive ports via dependency injection. Each service is split by IOSP into a side-effect-free `_pruefen` function and an integration function.
+| `anwendungskern/ausleihe_service.py:105-139`
+
+| Adapters
+| SQLite repositories, FastAPI router, `SystemClock`. No business logic.
+| `adapters/persistence/sqlite_ausleihe_repository.py:1-93`, `adapters/rest/app.py:1-12`
+|===
+
+[`src/leihgut/ports/ausleihe_repository.py:1-44`, `src/leihgut/anwendungskern/ausleihe_service.py:105-139`, `src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:1-93`, `src/leihgut/adapters/rest/app.py:1-12`]
+
+---
+
+== 5. Building Block View
+
+=== Level 1 — Overall System
+
+----
+┌─────────────────────────────────────────────────┐
+│                   leihgut                        │
+│                                                  │
+│  ┌─────────┐   ┌──────────┐   ┌──────────────┐  │
+│  │ Domain  │◄──│  Ports   │◄──│ Anwendungs-  │  │
+│  │ layer   │   │ (ABCs)   │   │ kern (UC fns)│  │
+│  └─────────┘   └──────────┘   └──────┬───────┘  │
+│                                       │           │
+│  ┌─────────────────────────┐          │           │
+│  │      Adapters           │──────────┘           │
+│  │  SQLite │ FastAPI │ Clock│                      │
+│  └─────────────────────────┘                      │
+└─────────────────────────────────────────────────┘
+----
+
+=== Level 2 — Adapters
+
+[cols="1,2,2"]
+|===
+| Component | Description | File
+
+| SQLite repositories
+| One adapter class per port. Translate between domain types and SQL rows.
+| `adapters/persistence/sqlite_ausleihe_repository.py:13-92`
+
+| Atomic composite port
+| `PruefabschlussRepository` bundles five write types in a single `BEGIN IMMEDIATE` transaction.
+| `ports/pruefabschluss_repository.py:21-35`
+
+| REST adapter
+| FastAPI `create_app` factory. Role enforcement, DTO mapping, error→HTTP status translation. Zero business logic.
+| `adapters/rest/app.py:254-592`
+
+| Clock adapter
+| `SystemClock` wraps `datetime.now(UTC)`.
+| `adapters/system_clock.py:1-13`
+|===
+
+---
+
+== 6. Runtime View
+
+=== Checkout (UC-01)
+
+Read item → read category → read open loans (limit/overdue check) → read training → conditionally read reservation queue → validate via pure `_ausgabe_pruefen` → `BEGIN IMMEDIATE` → insert loan → update item state → write two audit entries → commit.
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:144-246`]
+
+=== Return (UC-03)
+
+Validate loan is active → update loan to `zurueckgegeben` → update item to `in_pruefung` → call `vormerkungs_verwalten_nach_rueckgabe` (auto-cancel first reservation) → write two audit entries.
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:251-314`, `src/leihgut/anwendungskern/vormerkung_service.py:121-147`]
+
+=== Inspection close (UC-04)
+
+Validate loan in `zurueckgegeben` and item in `in_pruefung` → validate deduction ≤ deposit → compute damage dedup → increment counter → determine next state → `BEGIN IMMEDIATE` → atomically write loan close, item state, inspection report, damage entries, deposit movements, audit entry.
+
+[`src/leihgut/anwendungskern/pruefung_service.py:100-230`, `src/leihgut/adapters/persistence/sqlite_pruefabschluss_repository.py:21-101`]
+
+=== Loss (UC-06)
+
+Validate loan active → `BEGIN IMMEDIATE` → set loan to `abgeschlossen_verloren` → set item to `ausgemustert` → insert `VERLUST_EINZUG` deposit movement → write two audit entries → commit.
+
+[`src/leihgut/anwendungskern/verlust_service.py:48-175`]
+
+---
+
+== 7. Deployment View
+
+The system runs as a single process.
+SQLite is a local file opened with `check_same_thread=False`.
+FastAPI runs under uvicorn.
+Tests use `:memory:` databases.
+There is no container definition or cloud configuration in the repository.
+
+[`src/leihgut/adapters/persistence/sqlite_gegenstand_repository.py:10-25`, `pyproject.toml:6-11`]
+
+---
+
+== 8. Crosscutting Concepts
+
+=== 8.1 Threat Model
+
+[cols="1,2,3"]
+|===
+| ID | STRIDE category | Description
+
+| T-004
+| Spoofing
+| The `X-Rolle` header is accepted without verification. Any HTTP client can impersonate any role by setting the header value. Documented as deliberate in release 1.
+|===
+
+[`README.adoc:57-58`, `src/leihgut/adapters/rest/rollen.py:1-27`]
+
+=== 8.2 Security
+
+Role enforcement closes T-004 only within the trust boundary of requests that arrive from the local network.
+For release 1 this is an accepted residual risk.
+All role guards are applied before the application kernel is called.
+
+[`src/leihgut/adapters/rest/rollen.py:1-27`, `src/leihgut/adapters/rest/app.py:270-274`]
+
+=== 8.3 Test Concept
+
+Hamburg-Style TDD:
+
+* Side-effect-free `_pruefen` functions are unit-tested without any ports.
+* Integration functions are tested against `:memory:` SQLite — repositories are never mocked.
+* Every test references its UC-ID or BR-ID in a comment.
+* Property-based testing via `hypothesis` covers `kaution_berechnen` (BR-KAT-04).
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:105-107`, `tests/test_epic_a_ausleihe.py:134-229`, `README.adoc:63-68`]
+
+=== 8.4 Observability
+
+Observability is limited to:
+
+* The append-only audit log, written in every state-transition transaction.
+* An admin endpoint for log stats and cleanup.
+
+No structured logging, metrics, or distributed tracing are present.
+
+[`src/leihgut/adapters/rest/app.py:540-585`, `src/leihgut/anwendungskern/audit_retention_service.py:141-197`]
+
+=== 8.5 Error Handling
+
+Services return typed rejection dataclasses instead of raising exceptions.
+The REST adapter maps each type to an HTTP status code via lookup tables.
+No retry or circuit-breaker mechanism is present (single-process, no remote calls).
+
+[`src/leihgut/anwendungskern/ausleihe_service.py:34-83`, `src/leihgut/adapters/rest/app.py:127-230`]
+
+=== 8.6 Audit Trail
+
+Every state change writes an `AuditLogEintrag` in the same transaction as the domain change.
+Two database triggers prevent `UPDATE` and `DELETE` on the `audit_log` table.
+Retention: hot window = 90 days; warm archival is optional and disabled by default; cold deletion is not yet implemented.
+
+[`src/leihgut/adapters/persistence/schema.sql:96-106`, `src/leihgut/adapters/persistence/sqlite_audit_log_repository.py:17-37`, `src/leihgut/anwendungskern/audit_retention_service.py:25-32`]
+
+---
+
+== 9. Architecture Decisions
+
+See the ADR files in `docs/specs/adrs/`:
+
+* `leihgut-adr-004-sqlite-single-file.adoc` — single SQLite file as persistence store.
+* `leihgut-adr-006-injectable-clock.adoc` — injectable `Clock` port for testable deadlines.
+* `leihgut-adr-007-toctou-prevention.adoc` — `BEGIN IMMEDIATE` + partial unique index to prevent concurrent-checkout races.
+* `leihgut-adr-009-immutable-audit-log.adoc` — append-only audit log enforced by DB triggers.
+
+---
+
+== 10. Quality Requirements
+
+=== Quality Scenarios
+
+[cols="1,1,1,1,1,1,1"]
+|===
+| ID | Source | Stimulus | Artifact | Environment | Response | Response Measure
+
+| QS-01
+| Concurrent HTTP clients
+| Two clients attempt checkout of the same item simultaneously
+| SQLite persistence adapter
+| Normal operation
+| Second request is rejected with 409
+| `BEGIN IMMEDIATE` + partial unique index on `ausleihe(gegenstand_id) WHERE zustand='aktiv'` guarantees serialisation without explicit application locking. [`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`]
+
+| QS-02
+| Counter staff
+| Checkout request arrives
+| Application kernel
+| Normal operation
+| System computes deposit as a snapshot
+| `kaution_cent` is frozen at checkout time; changes to category values do not affect active loans. [`src/leihgut/domain/ausleihe.py:28`, `src/leihgut/anwendungskern/ausleihe_service.py:194`]
+
+| QS-03
+| Deposit calculation
+| Any `wiederbeschaffungswert_cent` input
+| `kaution_berechnen` function
+| Any call
+| Result is a whole-euro multiple in [500, 10 000] cents
+| `KAUTION_MIN_CENT = 500`, `KAUTION_MAX_CENT = 10_000`; property-based tests verify this over the full integer range. [`domain/kaution.py:7-20`, `tests/test_epic_d_katalog.py:79-95`]
+
+| QS-04
+| Admin or attacker
+| Attempt to UPDATE or DELETE an audit log entry
+| SQLite `audit_log` table
+| Any context
+| SQL statement aborts
+| Two DDL triggers raise an error on any `UPDATE` or `DELETE` on `audit_log`. [`src/leihgut/adapters/persistence/schema.sql:96-106`]
+
+| QS-05
+| Developer
+| Adding a new use-case service
+| Application kernel
+| Development
+| New service can be tested without changing the REST adapter
+| IOSP split + port injection means the pure validation function has no imports beyond the domain layer. [`src/leihgut/anwendungskern/ausleihe_service.py:105-141`]
+
+| QS-06
+| Operations
+| Running all tests
+| Test suite
+| CI environment
+| All tests pass against `:memory:` SQLite with no external services
+| No repository mock is used in integration tests. [`tests/test_epic_a_ausleihe.py:134-229`]
+|===
+
+=== Quality-Goal Priority
+
+The priority ranking across quality characteristics is deferred.
+_The Architect has not yet specified which characteristic — functional correctness, data reliability, or maintainability — should win when trade-offs arise._
+
+=== Performance and Scalability
+
+Performance targets are deferred.
+_Operations has not yet specified the acceptable response-time budget per REST call or the concurrent-user ceiling for the single-process SQLite deployment._
+
+=== Interoperability
+
+External integration requirements are deferred.
+_The Architect has not yet specified which external systems must be integrated._
+
+=== Usability
+
+Usability targets are deferred.
+_The Product Owner has not yet specified the primary usability goal._
+
+---
+
+== 11. Risks and Technical Debt
+
+=== Known Technical Debt
+
+[cols="1,3,2"]
+|===
+| Item | Description | Evidence
+
+| Reservation check on extension
+| BR-AUS-07 check for `VormerkungOffen` during loan extension is commented out with `# UNCOMMENT mit EPIC-E`.
+| `src/leihgut/anwendungskern/verlaengerung_service.py:128-131`
+
+| Member block list stub
+| `gesperrte_mitglieder=[]` is hard-coded in the reservation endpoint with a TODO comment.
+| `src/leihgut/adapters/rest/app.py:400-407`
+
+| Initial deposit movement
+| `HINTERLEGUNG` movement type is defined but never written to the deposit ledger.
+| `src/leihgut/domain/kautionsbewegung.py:14-15`
+
+| Audit cold-tier deletion
+| Cold-tier deletion is labelled `deferred` in comments; not implemented.
+| `src/leihgut/anwendungskern/audit_retention_service.py:9`
+|===
+
+=== Security Risks
+
+The `X-Rolle` header is trusted without cryptographic verification.
+Any HTTP client can bypass all role checks by setting the header value.
+This is acknowledged in `README.adoc:57-58` and treated as an accepted risk for release 1.
+
+=== Operational Risks
+
+* Single process with one SQLite file: no backup strategy, no health endpoint, no graceful shutdown documented. [`src/leihgut/adapters/persistence/sqlite_gegenstand_repository.py:10-25`]
+* All writes are serialised through `BEGIN IMMEDIATE`; a hung writer blocks all other writes. [`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`]
+
+=== Dependency / Supply-Chain Risks
+
+`pyproject.toml` specifies only minimum version bounds (`>=`).
+No lock file exists in the repository.
+Builds are not reproducible without an external lock. [`pyproject.toml:6-19`]
+
+=== Scaling / Performance Risks
+
+`BEGIN IMMEDIATE` serialises all writes through SQLite's single-writer model.
+This is safe for the stated deployment profile but will not scale to concurrent API load without changing the persistence layer.
+[`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`, `src/leihgut/adapters/persistence/schema.sql:55-59`]
+
+---
+
+== 12. Glossary
+
+[cols="1,2"]
+|===
+| Term | Meaning
+
+| Ausleihe | Loan agreement [`domain/ausleihe.py:22`]
+| Gegenstand | Equipment item [`domain/gegenstand.py:23`]
+| Kategorie | Equipment category [`domain/kategorie.py:9`]
+| Einweisung | Training certification [`domain/einweisung.py:11`]
+| Vormerkung | Reservation [`domain/vormerkung.py:18`]
+| Kaution | Security deposit [`domain/kaution.py:12`]
+| Kautionsbewegung | Deposit ledger entry [`domain/kautionsbewegung.py:21`]
+| Pruefprotokoll | Inspection report [`domain/pruefprotokoll.py:11`]
+| MaengelEintrag | Damage record [`domain/maengel.py:11`]
+| AuditLogEintrag | Immutable audit entry [`domain/audit_log.py:13`]
+| Thekendienst | Counter staff [`adapters/rest/rollen.py:19`]
+| Wart | Workshop manager [`adapters/rest/rollen.py:19`]
+| IOSP | Integration Operation Segregation Principle: a function is either composition or logic, never both.
+| Hexagonal Architecture | Ports & Adapters pattern by Alistair Cockburn.
+|===

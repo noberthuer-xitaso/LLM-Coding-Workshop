@@ -1,0 +1,128 @@
+= Product Requirements Document: Leihgut
+:toc: left
+:toclevels: 2
+:icons: font
+:revdate: 2026-08-24
+
+== Problem Statement
+
+A "Bibliothek der Dinge" (library of things) lends tools and devices to its members.
+Today the process is managed with a ring-binder and cash deposits.
+Three concrete failures recur in production:
+
+* Deposits are paid out in the wrong amount.
+* Items due for maintenance are handed out despite being blocked.
+* Reservations are ignored when a loan is extended.
+
+The system replaces the ring-binder with a digitised lending process that enforces all three constraints automatically.
+[`README.adoc:11-24`]
+
+== Target Users
+
+Three personas use the system:
+
+[cols="1,2,3"]
+|===
+| Persona | Role identifier | Primary concern
+
+| Karim
+| `thekendienst` (counter staff)
+| Instant authorisation decision at handout — can this item go out right now?
+
+| Sabine
+| `mitglied` (member)
+| Check availability and place a reservation without visiting the counter.
+
+| Rolf
+| `wart` (workshop manager)
+| Close inspections, finish maintenance, record training certifications, and manage the catalogue.
+|===
+
+A fourth technical actor (`admin`) manages audit-log retention.
+[`README.adoc:43-49`, `src/leihgut/adapters/rest/rollen.py:13-27`, `src/leihgut/adapters/rest/app.py:541-561`]
+
+== Goals
+
+The system must ensure:
+
+. The counter always knows — instantly — whether an item may be issued.
+. Every deposit movement (collection, deduction on damage, seizure on loss) is traceable.
+. Items due for maintenance are withheld automatically.
+. Reservations are honoured when loans are extended.
+
+[`README.adoc:61-80`]
+
+== Channels and Interface
+
+The system exposes one REST API (FastAPI) and a CLI.
+There is deliberately no web UI in release 1.
+[`README.adoc:50-59`, `src/leihgut/adapters/rest/app.py:254-592`]
+
+== Success Criteria
+
+Success criteria for release 1 are deferred and must be resolved before the next release.
+
+_Gap: The Product Owner has not yet specified which measurable outcome defines a successful release — for example, zero incorrect deposit payouts, zero maintenance-blocked items issued, or a target reservation-adherence rate._
+
+== Scope
+
+=== In scope
+
+* Checkout, extension, and return of items (with deposit lifecycle).
+* Inspection close with damage recording and deposit deduction.
+* Loss declaration with 100 % deposit seizure and item decommission.
+* Reservation (FIFO queue per category).
+* Training certification and revocation.
+* Catalogue management (categories and items).
+* Availability query.
+* Audit-log retention management.
+
+=== Out of scope
+
+* Member management — member identity is an opaque string; there is no member creation, authentication, or profile management. [`src/leihgut/adapters/persistence/schema.sql:61-65`, `src/leihgut/domain/ausleihe.py:25`]
+* Payment processing — no integration with payment systems.
+* Web UI.
+
+=== Delivery priority
+
+Delivery priority across user segments is deferred and must be resolved before release planning.
+
+_Gap: The Product Owner has not yet specified whether counter checkout, member self-service, or workshop operations should be delivered first._
+
+== Constraints
+
+. Single locally startable process; no external services. [`README.adoc:50-59`]
+. REST API and CLI only; no web UI. [`README.adoc:50-59`]
+. No real authentication in release 1 — the role is read from an `X-Rolle` HTTP header and is not cryptographically verified. This is a deliberate, acknowledged constraint. [`README.adoc:57-58`, `src/leihgut/adapters/rest/rollen.py:1-27`]
+. Date/time comes from a replaceable `Clock` port so that deadlines are fully testable. [`src/leihgut/ports/clock.py:1-18`]
+
+== Open Questions
+
+[cols="1,2,1"]
+|===
+| Question | Detail | Owner
+
+| Success metrics
+| What measurable outcome defines release 1 success?
+| Product Owner
+
+| Segment priority
+| Which workflow — counter, member self-service, or workshop — ships first?
+| Product Owner
+
+| Usability target
+| Response speed at counter, member self-service clarity, or minimising Rolf's data-entry burden?
+| Product Owner
+
+| External integrations
+| Which external systems must this context integrate with, and on what contracts?
+| Architect
+
+| Performance budget
+| Response-time budget per REST call and concurrent-user ceiling for SQLite deployment.
+| Operations
+
+| Quality-goal priority
+| Which characteristic wins when trade-offs arise — correctness, reliability, or maintainability?
+| Architect
+|===

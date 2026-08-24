@@ -1,0 +1,80 @@
+= ADR-004: SQLite als einziger Persistenzspeicher
+:toc: left
+:icons: font
+:revdate: 2026-08-24
+
+== Status
+
+Accepted
+
+== Context
+
+The system is a single-process lending tool for a "Bibliothek der Dinge."
+It runs locally on one machine, handles one counter at a time, and does not connect to external services.
+A persistence store is required for all aggregates, audit log, and deposit ledger.
+The quality goals emphasise functional correctness and data reliability; there is no stated need for horizontal scalability in release 1.
+
+[`src/leihgut/adapters/persistence/sqlite_gegenstand_repository.py:1-25`]
+
+== Decision
+
+Use a single SQLite file as the sole persistence store, opened with `check_same_thread=False`.
+All writes are serialised through SQLite's single-writer model using `BEGIN IMMEDIATE` transactions.
+Tests use `:memory:` databases.
+
+[`src/leihgut/adapters/persistence/sqlite_gegenstand_repository.py:10-25`]
+
+== Pugh Matrix
+
+Quality goals used: Functional correctness (+), Data reliability (+), Maintainability (+), Operational simplicity (+), Scalability (+).
+
+[cols="2,1,1,1,1,1,1"]
+|===
+| Alternative | Correctness | Reliability | Maintainability | Operational simplicity | Scalability | Total
+
+| *SQLite (chosen)*
+| +1
+| +1
+| +1
+| +1
+| -1
+| +3
+
+| PostgreSQL
+| +1
+| +1
+| 0
+| -1
+| +1
+| +2
+
+| In-memory dict (no persistence)
+| 0
+| -1
+| +1
+| +1
+| 0
+| +1
+|===
+
+PostgreSQL scores higher on scalability but introduces an external dependency that violates the single-process constraint and requires operational setup.
+SQLite delivers ACID guarantees, requires no setup, and supports the full test suite in-memory.
+
+== Consequences
+
+*Positive:*
+
+* Zero operational dependencies — a single `.db` file is the entire database.
+* Full ACID semantics with `BEGIN IMMEDIATE` write locks.
+* `:memory:` databases let the test suite run without any external state.
+
+*Negative:*
+
+* Single-writer ceiling: concurrent write load will require a database migration.
+* No built-in backup or replication; backup strategy is not yet defined.
+* `check_same_thread=False` requires disciplined use of `BEGIN IMMEDIATE` to avoid race conditions.
+
+*Risks:*
+
+* Hung writer blocks all other writes. [`src/leihgut/adapters/persistence/sqlite_ausleihe_repository.py:34-60`]
+* Builds are not reproducible without a lock file. [`pyproject.toml:6-19`]
