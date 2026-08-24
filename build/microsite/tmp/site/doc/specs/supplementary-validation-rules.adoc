@@ -1,0 +1,693 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: Supplementary Specification: Validierungsregeln & BR-Traceability-Matrix — Leihgut
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 3
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== Supplementary Specification: Validierungsregeln & BR-Traceability-Matrix — Leihgut
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+Dieses Dokument ergänzt die Geschäftsregeln (`business-rules.adoc`) und die Use-Case-Spezifikationen (`uc-*.adoc`) des Systems *Leihgut* um zwei Querschnittsthemen:
+
+. *Validierungsregeln* — präzise Formeln, Algorithmen und Edge Cases für die wichtigsten berechneten oder geprüften Größen.
+. *BR-Traceability-Matrix* — vollständige Zuordnung aller Geschäftsregeln zu Use Cases und Gherkin-Szenarien.
+
+=== Validierungsregeln
+
+==== Kautionsberechnung (BR-04)
+
+===== Algorithmus
+
+[source]
+----
+raw        = wiederbeschaffungswert_euro * 0.20
+gerundet   = kaufmaennisch_runden(raw)          // 0.5 wird aufgerundet
+kaution    = max(5, min(100, gerundet))
+----
+
+Die Kaution wird in *ganzen Euro* ausgewiesen.
+Kaufmännisches Runden bedeutet: Nachkommastellen ≥ 0,5 werden aufgerundet, < 0,5 abgerundet
+(Beispiel: 15,5 → 16; 15,4 → 15).
+
+===== Wertetabelle
+
+[cols="^1,^1,^1,^1,^2", options="header"]
+|===
+|WBW (€) |raw (20 %) |gerundet |angewendete Grenze |Kaution (€)
+
+|10  |2,00  |2   |Minimum (5 €)  |*5*
+|24  |4,80  |5   |Minimum (5 €)  |*5*
+|25  |5,00  |5   |Minimum (5 €)  |*5*
+|26  |5,20  |5   |—              |*5*
+|75  |15,00 |15  |—              |*15*
+|76  |15,20 |15  |—              |*15*
+|77  |15,40 |15  |—              |*15*
+|78  |15,60 |16  |—              |*16*
+|100 |20,00 |20  |—              |*20*
+|249 |49,80 |50  |—              |*50*
+|250 |50,00 |50  |—              |*50*
+|497 |99,40 |99  |—              |*99*
+|498 |99,60 |100 |Maximum (100 €)|*100*
+|500 |100,00|100 |Maximum (100 €)|*100*
+|600 |120,00|120 |Maximum (100 €)|*100*
+|===
+
+===== Edge Cases
+
+* *WBW = 1 €* → raw = 0,20 → gerundet = 0 → Minimum → Kaution = 5 €.
+* *WBW = 25 €* → raw = 5,00 → gerundet = 5 → Minimum greift *exakt* (kein Abzug) → Kaution = 5 €.
+* *Grenze Minimum/frei* liegt bei WBW ≥ 25 €, sofern raw ≥ 5,0 nach Runden.
+* *Grenze frei/Maximum* liegt bei WBW = 497 € (Kaution 99 €) vs. 498 € (Kaution 100 €).
+* *WBW ist immer ein positiver Ganzbetrag* (BR-03); Dezimalwerte sind nicht erlaubt.
+
+===== Implementierungshinweis
+
+In Java/Kotlin: `Math.round(raw)` verwendet kaufmännisches Runden (HALF_UP bei .5).
+In Python: `round()` verwendet _Banker's Rounding_ (HALF_EVEN); stattdessen
+`decimal.Decimal(...).quantize(Decimal('1'), rounding=ROUND_HALF_UP)` verwenden.
+
+---
+
+==== Rückgabefrist (BR-09)
+
+===== Berechnung bei Ausgabe
+
+[source]
+----
+rueckgabefrist = ausgabe_datum + kategorie.leihdauer_tage  // Kalendertage
+----
+
+* *Ausgabe 2026-09-01*, Leihdauer 14 Tage → Frist *2026-09-15*.
+* Das Ausgabedatum selbst zählt als Tag 0; Tag 14 ist der letzte Rückgabetag.
+* Wochentage und Feiertage werden nicht berücksichtigt; es gelten reine Kalendertage.
+
+===== Verlängerung (BR-10)
+
+[source]
+----
+neue_rueckgabefrist = aktuelle_rueckgabefrist + kategorie.leihdauer_tage
+----
+
+* Die Verlängerung verlängert die *bestehende Frist*, nicht das heutige Datum.
+* Beispiel: Frist 2026-09-15, Leihdauer 14 Tage → neue Frist *2026-09-29*.
+
+===== Überfälligkeitsprüfung (BR-35)
+
+[source]
+----
+ist_ueberfaellig = (heute > rueckgabefrist) AND (rueckgabe_datum IS NULL)
+----
+
+* Frist *gleich* heute: *nicht überfällig*.
+* Status `in_Prüfung` (Gegenstand wurde zurückgegeben, Prüfprotokoll noch offen):
+  `rueckgabe_datum IS NOT NULL` → *nicht mehr überfällig* für Sperrzwecke.
+
+---
+
+==== Reservierungsverfall (BR-31)
+
+===== Berechnung
+
+[source]
+----
+verfall_datum = entstehung_datum + 3 Kalendertage
+ist_verfallen  = (aktuelles_datum > verfall_datum)
+----
+
+* *Entstehung 2026-09-01* → Verfall_Datum = *2026-09-04*.
+* Am 01., 02., 03.09. ist die Reservierung *gültig*; ab 04.09. ist sie *verfallen*
+  (das System prüft `aktuelles_datum > verfall_datum`, d. h. erst wenn der vierte Tag
+  begonnen hat).
+* Das Mitglied hat also *drei volle Abholungstage* nach dem Entstehungstag.
+
+===== Verfall-Auslösung
+
+Das System prüft den Verfall beim nächsten systemrelevanten Ereignis
+(z. B. nächste Ausgabe-Anfrage für den Gegenstand, nächste Reservierungsanfrage
+derselben Kategorie). Es gibt keinen expliziten Hintergrundprozess als Anforderung.
+
+===== Folgen des Verfalls
+
+[source]
+----
+wenn ist_verfallen:
+  1. Reservierung stornieren
+  2. falls nächste Vormerkung in Warteschlange vorhanden:
+       neues_verfall_datum = heute + 3 Tage
+       Reservierung für nächstes nicht-gesperrtes Mitglied anlegen (BR-33)
+  3. sonst:
+       gegenstand.zustand = verfügbar
+----
+
+---
+
+==== Ausleihlimit (BR-06)
+
+===== Prüfbedingung
+
+[source]
+----
+aktive_ausleihen = COUNT(Ausleihe
+  WHERE mitglied_id = X
+  AND status IN {aktiv, in_Prüfung})
+
+ausgabe_verweigert = (aktive_ausleihen >= 3)
+----
+
+* Status `aktiv`: Gegenstand ist ausgegeben, Prüfprotokoll fehlt noch.
+* Status `in_Prüfung`: Gegenstand wurde zurückgegeben (UC-03), Prüfprotokoll noch nicht erstellt —
+  zählt weiterhin als aktive Ausleihe des Mitglieds.
+* Status `abgeschlossen`: zählt *nicht* mit.
+* *Vormerkungen zählen nicht mit* (BR-06 ausdrücklich).
+
+===== Grenzwert-Tabelle
+
+[cols="^1,^2", options="header"]
+|===
+|Aktive Ausleihen |Ausgabe möglich?
+|0 |Ja
+|1 |Ja
+|2 |Ja
+|3 |*Nein* (Limit erreicht, `AUSLEIHLIMIT_ERREICHT`)
+|===
+
+---
+
+==== Kautionsabzug (BR-21)
+
+===== Wertebereich
+
+[source]
+----
+0 ≤ kautionsabzug ≤ ausleihe.kaution_betrag_euro
+----
+
+* Negativer Abzug ist *nicht erlaubt* (HTTP 422, `KAUTIONSABZUG_NEGATIV`).
+* Abzug > hinterlegte Kaution ist *nicht erlaubt* (HTTP 422, `KAUTIONSABZUG_ZU_HOCH`).
+* Abzug = 0 ist erlaubt (keine Beschädigung, volle Rückerstattung).
+* Abzug = hinterlegte Kaution ist erlaubt (vollständige Einbehaltung, z. B. bei Verlust).
+
+===== Verloren-Erklärung (BR-19)
+
+[source]
+----
+wenn nachzustand = verloren:
+  kautionsabzug = ausleihe.kaution_betrag_euro   // automatisch 100 %
+  gegenstand.zustand = ausgemustert
+----
+
+Der vom Wart eingegebene `kautionsabzug`-Wert wird in diesem Fall ignoriert und
+systemseitig auf die volle Kaution gesetzt (BR-19 hat Vorrang).
+
+---
+
+==== Sperre (BR-34 / BR-35 / BR-36)
+
+===== Eintritt der Sperre (BR-34)
+
+[source]
+----
+ist_gesperrt = EXISTS(
+  Ausleihe
+  WHERE mitglied_id = X
+  AND status = aktiv
+  AND rueckgabefrist < heute
+)
+----
+
+* Ausleihen mit `status = in_Prüfung` sind *nicht* überfällig im Sperrsinne
+  (Gegenstand zurückgegeben → `rueckgabe_datum IS NOT NULL`).
+* Die Sperre gilt solange, wie *mindestens eine* überfällige Ausleihe existiert.
+
+===== Ende der Sperre (BR-36)
+
+[source]
+----
+sperre_aufgehoben = NOT EXISTS(
+  Ausleihe
+  WHERE mitglied_id = X
+  AND status = aktiv
+  AND rueckgabefrist < heute
+)
+----
+
+Die Sperre endet *automatisch*, wenn für alle überfälligen Ausleihen des Mitglieds
+das Prüfprotokoll abgeschlossen wurde (Status wechselt zu `abgeschlossen`).
+
+===== Wirkungen der Sperre
+
+[cols="3,^1", options="header"]
+|===
+|Aktion |Gesperrtes Mitglied erlaubt?
+|Neue Ausleihe (UC-01)              |*Nein* (BR-07)
+|Verlängerung (UC-02)               |*Nein* (implizit über Überfälligkeit)
+|Vormerken (UC-05)                  |*Ja* (BR-33)
+|Reservierung abholen (UC-01)       |*Nein* (BR-07); Reservierung wird übersprungen (BR-33)
+|===
+
+---
+
+==== Wartungsintervall (BR-23 / BR-24)
+
+===== Nutzungszähler-Aktualisierung
+
+[source]
+----
+// Bei Abschluss eines Prüfprotokolls (UC-04) oder Verloren-Erklärung (UC-07):
+gegenstand.nutzungszaehler += 1
+nutzungszaehler_neu = gegenstand.nutzungszaehler
+
+// Vorrangregel BR-24:
+wenn nutzungszaehler_neu >= kategorie.wartungsintervall_ausleihen:
+  effektiver_nachzustand = wartungsfällig   // überschreibt jede andere Eingabe
+sonst:
+  effektiver_nachzustand = eingegebener_nachzustand
+----
+
+IMPORTANT: *BR-24 hat Vorrang* vor dem explizit gesetzten Nachzustand `verfügbar`.
+Auch wenn der Wart `verfügbar` eingibt, erzwingt ein erreichtes Wartungsintervall
+den Zustand `wartungsfällig`.
+
+===== Ausnahme: Nachzustand `verloren` / `ausgemustert`
+
+[source]
+----
+wenn nachzustand_eingabe IN {verloren, ausgemustert}:
+  // BR-19 / BR-17 haben Vorrang — Gegenstand wird ausgemustert
+  // Nutzungszähler wird trotzdem inkrementiert (BR-23)
+  // Wartungsintervall-Prüfung ist irrelevant (Gegenstand wird stillgelegt)
+----
+
+===== Wartung abschließen (BR-25)
+
+[source]
+----
+// Eigenständige Aktion — KEIN Prüfprotokoll, KEINE Ausleihe-ID (UC-06)
+gegenstand.nutzungszaehler = 0
+gegenstand.zustand = verfügbar  // oder reserviert, falls Vormerkung vorliegt (BR-30)
+----
+
+Nach der Wartung beginnt der Zähler bei 0; das Intervall gilt neu.
+
+---
+
+==== Inventarnummern-Format (BR-01)
+
+* *Eindeutigkeit*: Die Inventarnummer muss systemweit eindeutig sein.
+* *Format*: Beliebiger nicht-leerer String, maximal 50 Zeichen.
+* *Beispiele*: `WZ-042`, `BH-001`, `GG-0042`.
+* Die Inventarnummer wird nie gelöscht — nur der Gegenstand-Zustand wechselt
+  (auf `ausgemustert`).
+* Bei Dopplung: HTTP 409, Fehlercode `INVENTARNUMMER_DOPPELT`.
+
+---
+
+==== Einweisungspflicht (BR-08)
+
+===== Prüfbedingung
+
+[source]
+----
+einweisung_vorhanden = EXISTS(
+  Einweisung
+  WHERE mitglied_id = X
+  AND kategorie_id = gegenstand.kategorie_id
+)
+
+ausgabe_erlaubt =
+  NOT kategorie.einweisungspflichtig
+  OR einweisung_vorhanden
+----
+
+* Ist die Kategorie *nicht* einweisungspflichtig: keine Prüfung nötig.
+* Ist die Kategorie einweisungspflichtig: Einweisung muss für *diese Kategorie*
+  (nicht für einzelnen Gegenstand) dokumentiert sein.
+* Bei fehlender Einweisung: HTTP 422, Fehlercode `EINWEISUNG_FEHLT`.
+
+---
+
+=== BR-Traceability-Matrix
+
+Die folgende Tabelle zeigt für jede Geschäftsregel (BR-01 bis BR-36), durch welche
+Use Cases und welche Gherkin-Szenarien sie abgedeckt ist.
+
+*Legende Status:*
+
+* `✅ abgedeckt` — mindestens ein Gherkin-Szenario vorhanden
+* `⚠ teilweise` — UC-Referenz vorhanden, aber kein dediziertes Gherkin-Szenario
+* `❌ offen` — kein Gherkin-Szenario vorhanden
+
+[cols="1,3,2,4,^1", options="header"]
+|===
+|BR-ID |Kurzbeschreibung |UC(s) |Gherkin-Szenario(s) |Status
+
+|BR-01
+|Inventarnummer systemweit eindeutig
+|UC-08
+|UC-08: „Gegenstand erfolgreich anlegen" +
+UC-08: „Doppelte Inventarnummer wird abgelehnt (BR-01)"
+|✅
+
+|BR-02
+|Kategorie bestimmt Leihdauer, Wartungsintervall, Einweisungspflicht
+|UC-08
+|UC-08: „Kategorie erfolgreich anlegen" +
+UC-08: „Kategorie mit ungültiger Leihdauer wird abgelehnt" +
+UC-08: „Kategorie-Leihdauer ändern betrifft nur neue Ausleihen"
+|✅
+
+|BR-03
+|Wiederbeschaffungswert: positiver Ganzbetrag
+|UC-08
+|UC-08: „Gegenstand erfolgreich anlegen"
+_(WBW-Validierung implizit; kein separates Fehlerszenario)_
+|⚠
+
+|BR-04
+|Kautionsberechnung: 20 % WBW, kaufm. gerundet, min 5 €, max 100 €
+|UC-01, UC-08
+|UC-01: „Kautionshinterlegung und Audit-Eintrag werden korrekt angelegt (BR-04, BR-20, BR-22)" +
+UC-01: „Kautionsminimum wird angewendet (BR-04)" +
+UC-01: „Kautionsmaximum wird angewendet (BR-04)" +
+UC-08: „Kautionsberechnung — Normalfall (BR-04)" +
+UC-08: „Kautionsberechnung — kaufmännisches Runden (BR-04)" +
+UC-08: „Kautionsminimum 5 Euro wird angewendet (BR-04)" +
+UC-08: „Kautionsmaximum 100 Euro wird angewendet (BR-04)" +
+UC-08: „Kautionsberechnung exakt an der Maximumgrenze (BR-04)" +
+UC-08: „Kautionsberechnung knapp unter Maximum (BR-04)" +
+UC-08: „Kautionsberechnung typischer Mittelwert (BR-04)"
+|✅
+
+|BR-05
+|Ausgabe nur bei Zustand verfügbar oder reserviert für dieses Mitglied
+|UC-01
+|UC-01: „Ausleihe eines für dieses Mitglied reservierten Gegenstands (BR-05)" +
+UC-01: „Gegenstand ist bereits ausgeliehen (BR-05)" +
+UC-01: „Gegenstand ist für ein anderes Mitglied reserviert (BR-05)"
+|✅
+
+|BR-06
+|Ausleihlimit: maximal 3 aktive Ausleihen je Mitglied
+|UC-01
+|UC-01: „Ausleihlimit von 3 ist erreicht (BR-06)"
+|✅
+
+|BR-07
+|Gesperrtes Mitglied darf nicht ausleihen
+|UC-01
+|UC-01: „Gesperrtes Mitglied darf nicht ausleihen (BR-07)"
+|✅
+
+|BR-08
+|Einweisungspflicht: dokumentierte Einweisung für die Kategorie nötig
+|UC-01
+|UC-01: „Einweisungspflichtige Kategorie ohne dokumentierte Einweisung (BR-08)" +
+UC-01: „Einweisungspflichtige Kategorie mit vorhandener Einweisung ist erlaubt (BR-08)"
+|✅
+
+|BR-09
+|Rückgabefrist = Ausgabedatum + Leihdauer der Kategorie
+|UC-01
+|UC-01: „Erfolgreiche Ausleihe eines verfügbaren Gegenstands"
+_(Rückgabefrist in Nachbedingungen geprüft)_
+|✅
+
+|BR-10
+|Verlängerung: einmal je Ausleihe möglich
+|UC-02
+|UC-02: „Verlängerung bereits durchgeführt (BR-10)"
+|✅
+
+|BR-11
+|Verlängerung ausgeschlossen bei offener Vormerkung oder Überfälligkeit
+|UC-02
+|UC-02: „Ausleihe überfällig (BR-11, BR-35)" +
+UC-02: „Offene Vormerkung für die Kategorie (BR-11)" +
+UC-02: „Kombination – überfällig UND offene Vormerkung (BR-11)"
+|✅
+
+|BR-12
+|Rückgabe versetzt Gegenstand in Zustand „in Prüfung"; Ausleihe bleibt offen
+|UC-03
+|UC-03: „Erfolgreiche Rückgabe ohne Auffälligkeiten" +
+UC-03: „Rückgabe eines Gegenstands, der bereits in Prüfung ist" +
+UC-03: „Kaution bleibt hinterlegt, Ausleihe ist nach Rückgabe nicht abgeschlossen"
+|✅
+
+|BR-13
+|Auffälligkeiten bei Rückgabe als Freitext; kein Kautionsentscheid an der Theke
+|UC-03
+|UC-03: „Rückgabe mit Auffälligkeitsnotiz"
+|✅
+
+|BR-14
+|Prüfung und Prüfprotokoll nur durch den Wart
+|UC-04
+|UC-04: „[UC-04 / BR-14] Thekendienst darf kein Prüfprotokoll erstellen"
+|✅
+
+|BR-15
+|Prüfprotokoll schließt Ausleihe ab und legt Kautionsabzug fest
+|UC-04
+|UC-04: „[UC-04 / BR-15 / BR-17 / BR-20 / BR-22 / BR-23] Saubere Rückgabe ohne Abzug" +
+UC-04: „[UC-04 / BR-15 / BR-21 / BR-22] Rückgabe mit partiellem Kautionsabzug" +
+UC-03: „Kaution bleibt hinterlegt, Ausleihe ist nach Rückgabe nicht abgeschlossen"
+_(UC-03-Szenario prüft, dass Ausleihe vor Prüfprotokoll noch offen ist)_
+|✅
+
+|BR-16
+|Schaden wird laufender Ausleihe zugerechnet, sofern kein Vorschaden im Protokoll
+|UC-04
+|UC-04: _(Extension d „Vorschaden in früherem Prüfprotokoll vermerkt" — beschrieben,
+kein dediziertes Gherkin-Szenario)_
+|⚠
+
+|BR-17
+|Nachzustand nach Prüfung: verfügbar, wartungsfällig oder ausgemustert
+|UC-04
+|UC-04: „[UC-04 / BR-17] Gegenstand wird ausgemustert" +
+UC-04: „[UC-04 / BR-15 / BR-17 / BR-20 / BR-22 / BR-23] Saubere Rückgabe ohne Abzug"
+_(verfügbar) +_
+UC-04: „[UC-04 / BR-24] Nutzungszähler erreicht Wartungsintervall — Nachzustand überschrieben"
+_(wartungsfällig)_
+|✅
+
+|BR-18
+|Prüfprotokoll-Pflichtfelder (Zeitstempel, Wart-ID, Ausleihe-ID, Gegenstand-ID, Abzug, Nachzustand)
+|UC-04, UC-07
+|UC-04: „[UC-04 / BR-15 / BR-17 / BR-20 / BR-22 / BR-23] Saubere Rückgabe ohne Abzug"
+_(alle Felder in Response geprüft)_ +
+UC-07: „Erfolgreiche Verloren-Erklärung"
+_(optionale Begründung: UC-07: „Verloren-Erklärung ohne Begründung")_
+|✅
+
+|BR-19
+|Verloren erklären: Kaution 100 % einbehalten, Gegenstand ausgemustert
+|UC-07
+|UC-07: „Erfolgreiche Verloren-Erklärung" +
+UC-07: „Kaution vollständig einbehalten (BR-19, BR-21)" +
+UC-07: „Gegenstand nach Verloren-Erklärung ausgemustert"
+|✅
+
+|BR-20
+|Kaution bei Ausgabe hinterlegen; bei Prüfprotokoll-Abschluss freigeben
+|UC-01, UC-04
+|UC-01: „Kautionshinterlegung und Audit-Eintrag werden korrekt angelegt (BR-04, BR-20, BR-22)" +
+UC-04: „[UC-04 / BR-15 / BR-17 / BR-20 / BR-22 / BR-23] Saubere Rückgabe ohne Abzug"
+|✅
+
+|BR-21
+|Kautionsabzug höchstens so hoch wie hinterlegte Kaution
+|UC-04, UC-07
+|UC-04: „[UC-04 / BR-21] Kautionsabzug größer als hinterlegte Kaution wird abgelehnt" +
+UC-07: „Kaution vollständig einbehalten (BR-19, BR-21)"
+_(zeigt Abzug = 100 % als erlaubten Grenzfall)_
+|✅
+
+|BR-22
+|Audit-Eintrag je Kautionsbewegung (Zeitstempel, Betrag, Auslöser)
+|UC-01, UC-04, UC-07
+|UC-01: „Kautionshinterlegung und Audit-Eintrag werden korrekt angelegt (BR-04, BR-20, BR-22)" +
+UC-04: „[UC-04 / BR-22] Audit-Eintrag bei Kautionsfreigabe mit Abzug" +
+UC-07: „Audit-Eintrag für Kautionsbewegung vorhanden (BR-22)"
+|✅
+
+|BR-23
+|Nutzungszähler +1 je abgeschlossener Ausleihe
+|UC-04, UC-07
+|UC-04: „[UC-04 / BR-15 / BR-17 / BR-20 / BR-22 / BR-23] Saubere Rückgabe ohne Abzug"
+_(Zähler in Nachbedingungen geprüft)_ +
+UC-07: „Erfolgreiche Verloren-Erklärung"
+_(Zähler in Nachbedingungen geprüft)_
+|✅
+
+|BR-24
+|Wartungsfälligkeit durch Zähler hat Vorrang vor gesetztem Nachzustand verfügbar
+|UC-04
+|UC-04: „[UC-04 / BR-24] Nutzungszähler erreicht Wartungsintervall — Nachzustand überschrieben"
+|✅
+
+|BR-25
+|Wartung abschließen: Nutzungszähler → 0, Zustand → verfügbar (eigenständige Aktion)
+|UC-06
+|UC-06: „Erfolgreicher Wartungsabschluss ohne offene Vormerkung" +
+UC-06: „Nutzungszähler wird auf 0 gesetzt – unabhängig vom Ausgangswert" +
+UC-06: „Kein Prüfprotokoll und keine Ausleihe-ID erforderlich"
+|✅
+
+|BR-26
+|Wartungsfälliger Gegenstand wird nicht ausgegeben und nicht reserviert
+|UC-01, UC-06
+|UC-01: „Wartungsfälliger Gegenstand darf nicht ausgegeben werden (BR-26)" +
+UC-06: „Fehler – Gegenstand ist nicht wartungsfällig"
+_(setzt voraus, dass Gegenstand wartungsfällig ist, bevor Wartung abgeschlossen werden darf)_
+|✅
+
+|BR-27
+|Vormerkung gilt für eine Kategorie, nicht für einen einzelnen Gegenstand
+|UC-05
+|UC-05: „AC-05-01 — Vormerkung erfolgreich anlegen"
+_(Vormerkung ohne konkreten Gegenstand)_
+|✅
+
+|BR-28
+|Einmaligkeit: maximal eine Vormerkung je Mitglied je Kategorie
+|UC-05
+|UC-05: „AC-05-02 — Zweite Vormerkung für gleiche Kategorie abgelehnt (BR-28)"
+|✅
+
+|BR-29
+|Warteschlange: FIFO nach Eingangszeit
+|UC-05
+|UC-05: „AC-05-05 — Warteschlange: FIFO-Reihenfolge (BR-29)"
+|✅
+
+|BR-30
+|Reservierung bei Verfügbarkeit: erstes Mitglied der Warteschlange erhält Reservierung
+|UC-04, UC-05, UC-06
+|UC-04: „[UC-04 / BR-30] Nachzustand verfügbar mit offener Vormerkung — automatisch reserviert" +
+UC-05: „AC-05-08 — Sofortige Reservierung wenn Gegenstand verfügbar (BR-30)" +
+UC-06: „Wartungsabschluss mit offener Vormerkung – Gegenstand wird reserviert"
+|✅
+
+|BR-31
+|Reservierungsverfall nach 3 Kalendertagen
+|UC-05, UC-06
+|UC-05: „AC-05-06 — Reservierung verfällt nach 3 Tagen → nächstes Mitglied erhält Reservierung (BR-31)" +
+UC-05: „AC-05-06 — Abgelaufene Reservierung, keine weitere Vormerkung — Gegenstand wird verfügbar" +
+UC-06: „Wartungsabschluss mit offener Vormerkung – Gegenstand wird reserviert"
+_(Verfallsdatum heute + 3 Tage gesetzt)_
+|✅
+
+|BR-32
+|Wartungsfälligkeit lässt Warteschlange unberührt; keine Reservierung
+|UC-04, UC-05
+|UC-04: „[UC-04 / BR-32] Warteschlange bleibt unberührt wenn Gegenstand wartungsfällig wird" +
+UC-05: „AC-05-09 — Wartungsfälligkeit lässt Warteschlange unverändert (BR-32)"
+|✅
+
+|BR-33
+|Gesperrtes Mitglied: Reservierung überspringen, Platz in Warteschlange behalten
+|UC-04, UC-05, UC-06
+|UC-05: „AC-05-03 — Gesperrtes Mitglied darf vormerken (BR-33)" +
+UC-05: „AC-05-04 — Gesperrtes Mitglied: Reservierung wird übersprungen, Platz bleibt (BR-33)" +
+UC-06: „Wartungsabschluss mit ausschließlich gesperrten Vormerker-Mitgliedern"
+|✅
+
+|BR-34
+|Eintritt der Sperre: mindestens eine überfällige Ausleihe vorhanden
+|UC-01
+|UC-01: „Gesperrtes Mitglied darf nicht ausleihen (BR-07)"
+_(Szenario prüft Sperrwirkung; Eintrittsbedingung BR-34 implizit durch Setup)_
+|⚠
+
+|BR-35
+|Überfälligkeit: Rückgabefrist < heute AND Gegenstand nicht zurückgegeben
+|UC-01, UC-02
+|UC-02: „Ausleihe überfällig (BR-11, BR-35)"
+_(Definition Überfälligkeit direkt im Verlängerungs-Szenario geprüft)_
+|✅
+
+|BR-36
+|Ende der Sperre: alle überfälligen Ausleihen mit Prüfprotokoll abgeschlossen
+|—
+|_(Kein dediziertes Gherkin-Szenario vorhanden)_
+|❌
+
+|===
+
+---
+
+=== Abdeckungsanalyse
+
+==== Zusammenfassung
+
+[cols="^1,^3,^1", options="header"]
+|===
+|Status |Bedeutung |Anzahl BR
+
+|✅ abgedeckt    |Mindestens ein Gherkin-Szenario vorhanden           |30
+|⚠ teilweise    |UC-Referenz vorhanden, kein eigenes Gherkin-Szenario |3
+|❌ offen         |Kein Gherkin-Szenario vorhanden                      |1
+|===
+
+==== Teilweise abgedeckte BRs (⚠)
+
+[cols="1,3,3", options="header"]
+|===
+|BR-ID |Fehlende Testabdeckung |Empfohlenes Szenario
+
+|BR-03
+|Kein Fehler-Szenario für ungültigen Wiederbeschaffungswert (z. B. 0 €, negativ, Dezimalwert).
+|UC-08: „Gegenstand anlegen mit WBW = 0 wird abgelehnt" +
+UC-08: „Gegenstand anlegen mit negativem WBW wird abgelehnt"
+
+|BR-16
+|Vorschaden-Prüfung (Extension d in UC-04) hat kein eigenständiges Gherkin-Szenario.
+|UC-04: „Schaden wird nicht zugerechnet, wenn im Vorprotokoll vermerkt (BR-16)"
+
+|BR-34
+|Eintrittsbedingung der Sperre (der Moment, in dem sie eintritt) hat kein direktes Szenario.
+|UC-01 oder separates Szenario: „Mitglied wird gesperrt sobald Ausleihe überfällig wird (BR-34)" +
+_(ggf. in UC-02 oder separatem Sperre-UC)_
+
+|===
+
+==== Nicht abgedeckte BR (❌)
+
+[cols="1,3,3", options="header"]
+|===
+|BR-ID |Beschreibung |Empfohlenes Szenario
+
+|BR-36
+|Ende der Sperre wird nicht durch ein Gherkin-Szenario verifiziert. Es gibt keinen
+Use Case, der explizit testet: „Sperre endet, sobald letztes Prüfprotokoll abgeschlossen ist."
+|Neues Szenario in UC-04 oder eigenem Sperre-UC: +
+„Sperre endet nach Abschluss des letzten überfälligen Prüfprotokolls (BR-36)" +
+„Mitglied kann wieder ausleihen nach Ende der Sperre"
+
+|===
+
+==== Vollständig abgedeckte BRs (✅)
+
+BR-01, BR-02, BR-04, BR-05, BR-06, BR-07, BR-08, BR-09, BR-10, BR-11, BR-12,
+BR-13, BR-14, BR-15, BR-17, BR-18, BR-19, BR-20, BR-21, BR-22, BR-23, BR-24,
+BR-25, BR-26, BR-27, BR-28, BR-29, BR-30, BR-31, BR-32, BR-33, BR-35

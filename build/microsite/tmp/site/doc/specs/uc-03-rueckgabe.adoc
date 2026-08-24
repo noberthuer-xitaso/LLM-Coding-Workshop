@@ -1,0 +1,378 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: UC-03: Gegenstand zurücknehmen
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 3
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== UC-03: Gegenstand zurücknehmen
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+=== Übersicht
+
+[cols="1,3"]
+|===
+|Use-Case-ID |UC-03
+|Titel |Gegenstand zurücknehmen
+|Primary Actor |Karim (Thekendienst)
+|Beteiligte |Sabine (Mitglied, bringt Gegenstand zurück)
+|Auslöser |Mitglied erscheint an der Theke mit einem ausgeliehenen Gegenstand
+|Relevante Geschäftsregeln |BR-12, BR-13
+|===
+
+=== Persona Use Case (Cockburn Fully Dressed)
+
+==== Vorbedingungen
+
+. Die Ausleihe existiert und hat den Zustand `ausgeliehen`.
+. Der Gegenstand ist dem Mitglied zugeordnet und noch nicht zurückgegeben.
+. Der Thekendienst ist im System aktiv (Header `X-Role: thekendienst`).
+
+==== Nachbedingungen
+
+. Der Gegenstand hat den Zustand `in_Prüfung` (BR-12).
+. Die Ausleihe ist weiterhin offen — sie ist nicht abgeschlossen (BR-12).
+. Etwaige Auffälligkeiten sind als Freitext an der Rückgabe erfasst (BR-13).
+. Die Kaution bleibt vollständig hinterlegt; kein Abzug wurde vorgenommen.
+. Ein Zeitstempel der Rückgabe ist gespeichert.
+
+==== Hauptszenario
+
+[cols="^1,5,5"]
+|===
+|Schritt |Thekendienst (Karim) |System
+
+|1
+|Karim scannt die Inventarnummer des zurückgebrachten Gegenstands und schlägt die zugehörige aktive Ausleihe nach.
+|Das System zeigt Mitglied, Ausleihe-ID, Gegenstand und Rückgabefrist an.
+
+|2
+|Karim prüft den Gegenstand augenscheinlich auf sichtbare Schäden oder Verschmutzung.
+|—
+
+|3
+|Karim erfasst die Rückgabe. Gibt es keine Auffälligkeiten, lässt er das Feld leer.
+|—
+
+|4
+|—
+|Das System versetzt den Gegenstand in den Zustand `in_Prüfung` (BR-12). Die Ausleihe bleibt offen.
+
+|5
+|—
+|Das System speichert den Rückgabe-Zeitstempel sowie ggf. den Auffälligkeitstext (BR-13).
+
+|6
+|—
+|Das System gibt eine Bestätigung zurück: Zustand `in_Prüfung`, Zeitstempel, Ausleihe-ID.
+
+|7
+|Karim informiert Sabine, dass der Gegenstand in Prüfung geht und die Kaution durch den Wart freigegeben wird.
+|—
+|===
+
+==== Erweiterungsszenarien
+
+===== E1 — Rückgabe mit Auffälligkeiten
+
+Im Schritt 3 notiert Karim eine Auffälligkeit im Freitext (z. B. „Netzkabel angeschmort, Bohrer fehlt").
+Das System speichert den Text unverändert gemäß BR-13.
+Der Ablauf folgt ab Schritt 4 dem Hauptszenario.
+*Karim entscheidet nicht über einen Kautionsabzug* — das obliegt allein dem Wart (BR-14).
+
+===== E2 — Gegenstand ist bereits in Prüfung oder zurückgegeben
+
+Im Schritt 1 stellt das System fest, dass die Ausleihe den Zustand `in_Prüfung` oder `abgeschlossen` hat.
+Das System antwortet mit `422 GEGENSTAND_BEREITS_ZURUECKGEGEBEN`.
+Karim informiert Sabine; der Vorgang endet ohne Änderung.
+
+===== E3 — Ausleihe-ID nicht gefunden
+
+Im Schritt 1 existiert die angegebene Ausleihe-ID nicht.
+Das System antwortet mit `404 AUSLEIHE_NICHT_GEFUNDEN`.
+Karim prüft die Inventarnummer und beginnt erneut.
+
+===== E4 — Überfällige Rückgabe
+
+Die Rückgabefrist liegt in der Vergangenheit.
+Das Hauptszenario läuft unverändert durch — die Rückgabe ist auch nach Fristablauf zulässig.
+Das System vermerkt die Überfälligkeit, damit der Wart sie im Prüfprotokoll berücksichtigen kann.
+
+=== System Use Cases
+
+==== Endpunkt: Rückgabe erfassen
+
+[cols="1,3"]
+|===
+|Methode |`POST`
+|Pfad |`/ausleihen/{ausleihe_id}/rueckgabe`
+|Rolle |`X-Role: thekendienst`
+|===
+
+===== Request Body
+
+[source,json]
+----
+{
+  "auffaelligkeiten": "string (optional, max. 1000 Zeichen)"
+}
+----
+
+Ein leerer Body (`{}`) ist gültig; das Feld `auffaelligkeiten` ist optional.
+
+===== Response 200 — Erfolgreiche Rückgabe
+
+[source,json]
+----
+{
+  "ausleihe_id": "string",
+  "gegenstand_id": "string",
+  "zustand": "in_Prüfung",
+  "zeitstempel_rueckgabe": "ISO 8601 datetime"
+}
+----
+
+===== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Bedingung
+
+|`404`
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Die `ausleihe_id` existiert nicht.
+
+|`422`
+|`GEGENSTAND_BEREITS_ZURUECKGEGEBEN`
+|Die Ausleihe hat bereits den Zustand `in_Prüfung` oder ist abgeschlossen; eine erneute Rückgabe ist nicht zulässig.
+
+|`403`
+|`ROLLE_NICHT_BERECHTIGT`
+|Der Header `X-Role` enthält weder `thekendienst` noch eine privilegierte Rolle.
+|===
+
+===== Systemverhalten (intern)
+
+. Das System prüft, ob die Ausleihe existiert → sonst `404`.
+. Das System prüft, ob der Gegenstand den Zustand `ausgeliehen` hat → sonst `422`.
+. Das System setzt den Gegenstand-Zustand auf `in_Prüfung` (BR-12).
+. Das System speichert den Rückgabe-Zeitstempel.
+. Das System speichert das Feld `auffaelligkeiten`, wenn vorhanden (BR-13).
+. Die Ausleihe bleibt offen; kein Kautionsabzug wird berechnet.
+. Das System gibt die Response-Payload zurück.
+
+=== Aktivitätsdiagramm
+
+[plantuml]
+....
+@startuml
+|Sabine (Mitglied)|
+start
+:Gegenstand an die Theke bringen;
+
+|Karim (Thekendienst)|
+:Inventarnummer scannen /\nAusleihe-ID ermitteln;
+:Gegenstand augenscheinlich prüfen;
+
+if (Auffälligkeiten festgestellt?) then (ja)
+  :Auffälligkeiten als Freitext notieren;
+else (nein)
+  :Kein Eintrag;
+endif
+
+:POST /ausleihen/{id}/rueckgabe\nAbsenden;
+
+|System|
+if (Ausleihe gefunden?) then (nein)
+  :404 AUSLEIHE_NICHT_GEFUNDEN zurückgeben;
+  stop
+endif
+
+if (Zustand == "ausgeliehen"?) then (nein)
+  :422 GEGENSTAND_BEREITS_ZURUECKGEGEBEN\nzurückgeben;
+  stop
+endif
+
+:Gegenstand-Zustand → "in_Prüfung" setzen;
+:Zeitstempel der Rückgabe speichern;
+:Auffälligkeiten speichern (falls vorhanden);
+:Ausleihe bleibt offen\n(Kaution hinterlegt);
+:200 OK mit\nausleihe_id, gegenstand_id,\nzustand, zeitstempel_rueckgabe;
+
+|Karim (Thekendienst)|
+:Bestätigung anzeigen;
+:Sabine informieren:\nGegenstand in Prüfung,\nKaution wird durch Wart freigegeben;
+
+|Sabine (Mitglied)|
+:Geht nach Hause;
+stop
+@enduml
+....
+
+=== Akzeptanzkriterien (Gherkin)
+
+==== Szenario 1 — Erfolgreiche Rückgabe ohne Auffälligkeiten
+
+[source,gherkin]
+----
+# UC-03 | BR-12
+Feature: Gegenstand zurücknehmen
+
+  Scenario: Erfolgreiche Rückgabe ohne Auffälligkeiten
+    Given eine aktive Ausleihe mit ID "AL-001" im Zustand "ausgeliehen"
+    And der Gegenstand "GG-042" ist dieser Ausleihe zugeordnet
+    When der Thekendienst POST /ausleihen/AL-001/rueckgabe mit leerem Body aufruft
+    Then antwortet das System mit HTTP 200
+    And die Response enthält "zustand": "in_Prüfung"
+    And die Response enthält einen "zeitstempel_rueckgabe"
+    And der Gegenstand "GG-042" hat im System den Zustand "in_Prüfung"
+    And die Ausleihe "AL-001" ist weiterhin offen (nicht abgeschlossen)
+----
+
+==== Szenario 2 — Rückgabe mit Auffälligkeitsnotiz
+
+[source,gherkin]
+----
+# UC-03 | BR-13
+  Scenario: Rückgabe mit Auffälligkeitsnotiz
+    Given eine aktive Ausleihe mit ID "AL-002" im Zustand "ausgeliehen"
+    When der Thekendienst POST /ausleihen/AL-002/rueckgabe aufruft
+    With Body: { "auffaelligkeiten": "Netzkabel angeschmort, Bohrer fehlt" }
+    Then antwortet das System mit HTTP 200
+    And die Response enthält "zustand": "in_Prüfung"
+    And die Ausleihe "AL-002" enthält die Auffälligkeit "Netzkabel angeschmort, Bohrer fehlt"
+    And kein Kautionsabzug wurde berechnet oder gespeichert
+----
+
+==== Szenario 3 — Rückgabe eines bereits zurückgegebenen Gegenstands
+
+[source,gherkin]
+----
+# UC-03 | BR-12
+  Scenario: Rückgabe eines Gegenstands, der bereits in Prüfung ist
+    Given eine Ausleihe mit ID "AL-003" im Zustand "in_Prüfung"
+    When der Thekendienst POST /ausleihen/AL-003/rueckgabe aufruft
+    Then antwortet das System mit HTTP 422
+    And der Fehlercode lautet "GEGENSTAND_BEREITS_ZURUECKGEGEBEN"
+    And der Gegenstand-Zustand bleibt unverändert "in_Prüfung"
+----
+
+==== Szenario 4 — Kaution bleibt hinterlegt nach Rückgabe
+
+[source,gherkin]
+----
+# UC-03 | BR-12 | BR-15
+  Scenario: Kaution bleibt hinterlegt, Ausleihe ist nach Rückgabe nicht abgeschlossen
+    Given eine aktive Ausleihe mit ID "AL-004" mit hinterlegter Kaution von 40 EUR
+    When der Thekendienst POST /ausleihen/AL-004/rueckgabe aufruft
+    Then antwortet das System mit HTTP 200
+    And die Ausleihe "AL-004" hat den Status "offen"
+    And der Kautionssaldo für "AL-004" beträgt weiterhin 40 EUR (hinterlegt, nicht freigegeben)
+    And es wurde kein Kautionsabzug-Eintrag im Audit-Log erzeugt
+----
+
+==== Szenario 5 — Ungültige Ausleihe-ID
+
+[source,gherkin]
+----
+# UC-03
+  Scenario: Rückgabe mit nicht existierender Ausleihe-ID
+    Given keine Ausleihe mit ID "AL-999" im System
+    When der Thekendienst POST /ausleihen/AL-999/rueckgabe aufruft
+    Then antwortet das System mit HTTP 404
+    And der Fehlercode lautet "AUSLEIHE_NICHT_GEFUNDEN"
+----
+
+=== EARS-Anforderungen
+
+Die folgenden Anforderungen sind nach dem EARS-Schema (Easy Approach to Requirements Syntax) formuliert.
+
+==== Funktionale Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderungstext
+
+|UC03-REQ-01
+|Ubiquitous
+|Das System SHALL bei der Rückgabe eines Gegenstands dessen Zustand von `ausgeliehen` auf `in_Prüfung` setzen. (BR-12)
+
+|UC03-REQ-02
+|Ubiquitous
+|Das System SHALL die Ausleihe nach der Rückgabe weiterhin als offen führen und sie NICHT abschließen. (BR-12)
+
+|UC03-REQ-03
+|Optional
+|Das System SHALL ein optionales Freitextfeld `auffaelligkeiten` bei der Rückgabe entgegennehmen und speichern. (BR-13)
+
+|UC03-REQ-04
+|Ubiquitous
+|Das System SHALL bei der Rückgabe keinen Kautionsabzug berechnen oder buchen. (BR-13, BR-14)
+
+|UC03-REQ-05
+|Ubiquitous
+|Das System SHALL den Zeitstempel der Rückgabe persistent speichern.
+
+|UC03-REQ-06
+|Event-driven
+|WHEN der Endpunkt `POST /ausleihen/{ausleihe_id}/rueckgabe` mit einer nicht existierenden `ausleihe_id` aufgerufen wird, SHALL das System mit HTTP 404 und Fehlercode `AUSLEIHE_NICHT_GEFUNDEN` antworten.
+
+|UC03-REQ-07
+|Event-driven
+|WHEN der Endpunkt `POST /ausleihen/{ausleihe_id}/rueckgabe` für eine Ausleihe aufgerufen wird, deren Gegenstand bereits den Zustand `in_Prüfung` oder `abgeschlossen` hat, SHALL das System mit HTTP 422 und Fehlercode `GEGENSTAND_BEREITS_ZURUECKGEGEBEN` antworten.
+
+|UC03-REQ-08
+|Ubiquitous
+|Das System SHALL die Rollenprüfung über den HTTP-Header `X-Role` durchführen; Aufrufe ohne die Rolle `thekendienst` SHALL das System mit HTTP 403 und Fehlercode `ROLLE_NICHT_BERECHTIGT` ablehnen.
+
+|UC03-REQ-09
+|Ubiquitous
+|Das System SHALL in der Erfolgsantwort die Felder `ausleihe_id`, `gegenstand_id`, `zustand` (Wert: `"in_Prüfung"`) und `zeitstempel_rueckgabe` im Format ISO 8601 zurückgeben.
+|===
+
+==== Nicht-funktionale Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderungstext
+
+|UC03-REQ-10
+|Performance
+|WHILE das System unter Normallast betrieben wird (400 Gegenstände, 800 Mitglieder), SHALL der Endpunkt `POST /ausleihen/{ausleihe_id}/rueckgabe` am 95. Perzentil über 100 aufeinanderfolgende Aufrufe in unter 300 ms antworten.
+
+|UC03-REQ-11
+|Ubiquitous
+|Das System SHALL sicherstellen, dass ein gleichzeitiger Doppelaufruf für dieselbe `ausleihe_id` nicht zu zwei erfolgreichen Rückgaben führt (Idempotenz durch optimistisches Locking oder vergleichbares Verfahren).
+|===
+
+=== Bezug zu anderen Use Cases
+
+[cols="1,3"]
+|===
+|Use Case |Beziehung
+
+|UC-01 (Gegenstand ausleihen)
+|Erzeugt die Ausleihe, die UC-03 voraussetzt. Der Gegenstand wechselt in UC-01 auf `ausgeliehen`.
+
+|UC-04 (Prüfprotokoll erstellen)
+|Folgeaktion von UC-03. Schließt die Ausleihe ab, legt den Kautionsabzug fest und setzt den Gegenstand in den Nachzustand (`verfügbar`, `wartungsfällig` oder `ausgemustert`).
+
+|UC-05 (Kaution freigeben)
+|Wird durch UC-04 ausgelöst; UC-03 initiiert keine Kautionsbewegung.
+|===

@@ -1,0 +1,509 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: UC-02: Ausleihe verlängern
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 3
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== UC-02: Ausleihe verlängern
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+=== Persona Use Case (Cockburn Fully Dressed)
+
+==== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID            |UC-02
+|Name             |Ausleihe verlängern
+|Scope            |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level            |User Goal
+|Primary Actor    |Thekendienst (Karim) — handelt auf Anfrage des Mitglieds an der Theke +
+                   Mitglied (Sabine) — kann Verlängerung selbst über API anstoßen
+|Sekundäre Akteure|Keine (vollständig systemgeführt)
+|Trigger          |Mitglied wünscht mehr Zeit für eine laufende Ausleihe, bevor die Rückgabefrist abläuft
+|Geschäftsregeln  |BR-10, BR-11, BR-35
+|===
+
+==== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interesse
+
+|Karim (Thekendienst)
+|In unter 30 Sekunden wissen, ob eine Verlängerung möglich ist; keine manuelle Fristberechnung; klare Fehlermeldung, wenn sie ausgeschlossen ist.
+
+|Sabine (Mitglied)
+|Frist flexibel verlängern können, ohne extra an die Theke zu kommen; sofortige Rückmeldung über das neue Rückgabedatum.
+
+|Andere Mitglieder mit Vormerkung
+|Sicherheit, dass eine Verlängerung unterbleibt, wenn sie auf die Kategorie warten — die Vormerkung darf nicht wertlos werden.
+
+|Verein / Betrieb
+|Korrekte, nachvollziehbare Fristführung; kein unendliches Festhalten von Gegenständen; Systemintegrität.
+|===
+
+==== Vorbedingungen
+
+. Die Ausleihe mit der angegebenen `ausleihe_id` existiert und hat den Status *aktiv* (Gegenstand ist ausgegeben, Prüfprotokoll liegt noch nicht vor).
+. Die Ausleihe wurde bisher *nicht* verlängert (`verlaengert = false`). _(BR-10)_
+. Die Rückgabefrist der Ausleihe liegt *heute oder in der Zukunft* — die Ausleihe ist nicht überfällig. _(BR-11, BR-35)_
+. Für die Kategorie des ausgeliehenen Gegenstands liegt *keine offene Vormerkung* vor. _(BR-11)_
+
+==== Nachbedingungen
+
+===== Erfolgsfall
+
+* Die Rückgabefrist der Ausleihe ist um die volle Leihdauer der Kategorie verlängert: +
+  `neue_frist = alte_frist + leihdauer_tage`.
+* Das Feld `verlaengert` der Ausleihe ist auf `true` gesetzt.
+* Datum und Uhrzeit der Verlängerung sind im Audit-Log festgehalten.
+
+===== Fehlschlag
+
+* Der Datensatz der Ausleihe bleibt unverändert.
+* Kein Audit-Eintrag wird erzeugt.
+
+==== Hauptszenario
+
+. Karim oder Sabine schicken `POST /ausleihen/{ausleihe_id}/verlaengerung` mit Header `X-Role: thekendienst` bzw. `X-Role: mitglied`.
+. Das System liest das aktuelle Datum aus der austauschbaren Datumsquelle.
+. Das System lädt die Ausleihe und prüft, ob sie existiert und aktiv ist.
+. Das System prüft, ob die Ausleihe bereits verlängert wurde _(BR-10)_.
+. Das System prüft, ob die Rückgabefrist abgelaufen ist _(BR-11, BR-35)_.
+. Das System prüft, ob für die Kategorie des Gegenstands eine offene Vormerkung besteht _(BR-11)_.
+. Alle Prüfungen bestehen.
+. Das System berechnet die neue Rückgabefrist: `alte_frist + leihdauer_tage`.
+. Das System speichert die neue Frist und setzt `verlaengert = true`.
+. Das System schreibt einen Audit-Eintrag mit Zeitstempel, `ausleihe_id`, alter und neuer Frist.
+. Das System antwortet mit HTTP 200 und der aktualisierten Ausleihe-Ressource.
+. Karim bestätigt Sabine das neue Rückgabedatum.
+
+==== Erweiterungen (Extensions)
+
+===== 3a — Ausleihe nicht gefunden
+
+[start=3]
+. Das System findet keine Ausleihe mit der angegebenen `ausleihe_id`.
+.. Das System antwortet mit HTTP 404 und Fehlercode `AUSLEIHE_NICHT_GEFUNDEN`.
+.. Use Case endet ohne Änderung.
+
+===== 3b — Ausleihe nicht aktiv (bereits abgeschlossen)
+
+[start=3]
+. Die Ausleihe existiert, hat aber den Status *abgeschlossen* (Prüfprotokoll liegt vor).
+.. Das System antwortet mit HTTP 409 und Fehlercode `AUSLEIHE_NICHT_AKTIV`.
+.. Use Case endet ohne Änderung.
+
+===== 4a — Ausleihe bereits verlängert (BR-10)
+
+[start=4]
+. Das System stellt fest, dass `verlaengert = true`.
+.. Das System antwortet mit HTTP 409 und Fehlercode `BEREITS_VERLAENGERT`.
+.. Use Case endet ohne Änderung.
+
+===== 5a — Ausleihe überfällig (BR-11, BR-35)
+
+[start=5]
+. Das System stellt fest, dass die Rückgabefrist vor dem heutigen Datum liegt.
+.. Das System antwortet mit HTTP 409 und Fehlercode `AUSLEIHE_UEBERFAELLIG`.
+.. Use Case endet ohne Änderung.
+
+===== 6a — Offene Vormerkung für die Kategorie (BR-11)
+
+[start=6]
+. Das System stellt fest, dass mindestens eine Vormerkung für die Kategorie des Gegenstands offen ist.
+.. Das System antwortet mit HTTP 409 und Fehlercode `VORMERKUNG_OFFEN`.
+.. Use Case endet ohne Änderung.
+
+===== 5a+6a — Überfällig UND offene Vormerkung
+
+[start=5]
+. Das System stellt bei parallelem Auftreten beider Ausschlussbedingungen die Überfälligkeit zuerst fest (Reihenfolge der Prüfung: BR-11 Überfälligkeit vor Vormerkung).
+.. Das System antwortet mit HTTP 409 und Fehlercode `AUSLEIHE_UEBERFAELLIG`.
+.. Die zweite Verletzung ist implizit; es wird nur eine Fehlermeldung zurückgegeben.
+
+---
+
+=== System Use Cases
+
+==== Endpunkt
+
+`POST /ausleihen/{ausleihe_id}/verlaengerung`
+
+[cols="1,3"]
+|===
+|Methode |POST
+|Pfad    |`/ausleihen/{ausleihe_id}/verlaengerung`
+|Rollen  |`thekendienst`, `mitglied` (Header `X-Role`)
+|===
+
+==== Eingabe
+
+[cols="1,1,3"]
+|===
+|Parameter |Typ |Beschreibung
+
+|`ausleihe_id`
+|Path-Parameter, UUID
+|Eindeutige ID der Ausleihe, die verlängert werden soll.
+
+|`X-Role`
+|HTTP-Header, String
+|Rolle des Aufrufers: `thekendienst` oder `mitglied`. Keine Authentifizierung, wird nicht geprüft.
+|===
+
+Kein Request Body erforderlich.
+
+==== Validierung und Verarbeitung
+
+[cols="1,4,3"]
+|===
+|Schritt |Prüfung |Fehler bei Verletzung
+
+|V1
+|`ausleihe_id` ist eine gültige UUID; Ausleihe existiert in der Datenbank.
+|404 `AUSLEIHE_NICHT_GEFUNDEN`
+
+|V2
+|Ausleihe hat Status `aktiv` (kein Prüfprotokoll vorhanden).
+|409 `AUSLEIHE_NICHT_AKTIV`
+
+|V3
+|`verlaengert = false` — Verlängerung wurde noch nicht genutzt. _(BR-10)_
+|409 `BEREITS_VERLAENGERT`
+
+|V4
+|`rückgabefrist >= aktuelles_datum` — Ausleihe ist nicht überfällig. _(BR-11, BR-35)_
+|409 `AUSLEIHE_UEBERFAELLIG`
+
+|V5
+|Keine offene Vormerkung für die Kategorie des ausgeliehenen Gegenstands vorhanden. _(BR-11)_
+|409 `VORMERKUNG_OFFEN`
+
+|P1
+|Neue Rückgabefrist berechnen: `rückgabefrist + leihdauer_tage` (Leihdauer der Kategorie).
+|—
+
+|P2
+|Ausleihe aktualisieren: `rückgabefrist = neue_frist`, `verlaengert = true`.
+|—
+
+|P3
+|Audit-Eintrag schreiben: `{zeitstempel, ausleihe_id, aktion: "VERLAENGERUNG", alte_frist, neue_frist}`.
+|—
+|===
+
+==== Ausgabe — HTTP 200
+
+[source,json]
+----
+{
+  "ausleihe_id": "a1b2c3d4-...",
+  "gegenstand_id": "g0042",
+  "mitglied_id": "m0815",
+  "ausgabe_datum": "2026-08-05",
+  "rückgabefrist": "2026-09-05",
+  "verlaengert": true,
+  "status": "aktiv"
+}
+----
+
+==== Fehlerfälle
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Fehlercode |Bedeutung
+
+|400
+|`UNGUELTIGE_AUSLEIHE_ID`
+|`ausleihe_id` ist keine gültige UUID.
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Keine Ausleihe mit dieser ID vorhanden.
+
+|409
+|`AUSLEIHE_NICHT_AKTIV`
+|Ausleihe ist bereits abgeschlossen (Prüfprotokoll vorhanden).
+
+|409
+|`BEREITS_VERLAENGERT`
+|Die Ausleihe wurde bereits einmal verlängert. _(BR-10)_
+
+|409
+|`AUSLEIHE_UEBERFAELLIG`
+|Die Rückgabefrist ist abgelaufen. _(BR-11)_
+
+|409
+|`VORMERKUNG_OFFEN`
+|Für die Kategorie des Gegenstands besteht mindestens eine offene Vormerkung. _(BR-11)_
+|===
+
+Fehlerantwort-Body (einheitlich):
+
+[source,json]
+----
+{
+  "fehlercode": "BEREITS_VERLAENGERT",
+  "meldung": "Diese Ausleihe wurde bereits verlängert. Eine weitere Verlängerung ist nicht möglich.",
+  "ausleihe_id": "a1b2c3d4-..."
+}
+----
+
+---
+
+=== Aktivitätsdiagramm (PlantUML)
+
+[plantuml]
+----
+@startuml UC-02 Ausleihe verlängern
+
+skinparam defaultFontName "Liberation Sans"
+skinparam activityBackgroundColor #F9F9F9
+skinparam activityBorderColor #555555
+skinparam swimlaneBorderColor #888888
+skinparam arrowColor #333333
+
+|Aufrufer\n(Thekendienst / Mitglied)|
+start
+:POST /ausleihen/{ausleihe_id}/verlaengerung\nX-Role: thekendienst | mitglied;
+
+|System|
+:ausleihe_id validieren;
+if (gültige UUID?) then (nein)
+  :HTTP 400\nUNGUELTIGE_AUSLEIHE_ID;
+  stop
+else (ja)
+endif
+
+:Ausleihe laden;
+if (Ausleihe gefunden?) then (nein)
+  :HTTP 404\nAUSLEIHE_NICHT_GEFUNDEN;
+  stop
+else (ja)
+endif
+
+if (Status = aktiv?) then (nein)
+  :HTTP 409\nAUSLEIHE_NICHT_AKTIV;
+  stop
+else (ja)
+endif
+
+:aktuelles Datum lesen\n(austauschbare Datumsquelle);
+
+if (verlaengert = false?\n[BR-10]) then (nein — bereits verlängert)
+  :HTTP 409\nBEREITS_VERLAENGERT;
+  stop
+else (ja)
+endif
+
+if (rückgabefrist >= heute?\n[BR-11, BR-35]) then (nein — überfällig)
+  :HTTP 409\nAUSLEIHE_UEBERFAELLIG;
+  stop
+else (ja)
+endif
+
+:Kategorie des Gegenstands ermitteln;
+if (offene Vormerkung\nfür Kategorie?\n[BR-11]) then (ja)
+  :HTTP 409\nVORMERKUNG_OFFEN;
+  stop
+else (nein)
+endif
+
+:neue_frist = rückgabefrist + leihdauer_tage;
+:Ausleihe speichern:\nrückgabefrist = neue_frist\nverlaengert = true;
+:Audit-Eintrag schreiben:\nZeitstempel, ausleihe_id,\nalte_frist, neue_frist;
+:HTTP 200\nAusleihe-Ressource (aktualisiert);
+stop
+
+@enduml
+----
+
+---
+
+=== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-02 Ausleihe verlängern
+
+  Grundlage:
+    Angenommen die Kategorie "Bohrhammer" hat eine Leihdauer von 14 Tagen
+    Und das aktuelle Datum ist "2026-09-01"
+
+  Szenario: Erfolgreiche Verlängerung
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-001" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-001" hat die Rückgabefrist "2026-09-10"
+    Und die Ausleihe "a-001" wurde noch nicht verlängert
+    Und für die Kategorie "Bohrhammer" liegt keine offene Vormerkung vor
+    Wenn POST /ausleihen/a-001/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 200
+    Und die Rückgabefrist der Ausleihe "a-001" ist "2026-09-24"
+    Und das Feld "verlaengert" der Ausleihe "a-001" ist "true"
+    Und ein Audit-Eintrag mit ausleihe_id "a-001", alter Frist "2026-09-10" und neuer Frist "2026-09-24" existiert
+
+  Szenario: Verlängerung bereits durchgeführt (BR-10)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-002" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-002" hat die Rückgabefrist "2026-09-24"
+    Und die Ausleihe "a-002" wurde bereits verlängert
+    Und für die Kategorie "Bohrhammer" liegt keine offene Vormerkung vor
+    Wenn POST /ausleihen/a-002/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "BEREITS_VERLAENGERT"
+    Und die Rückgabefrist der Ausleihe "a-002" bleibt unverändert "2026-09-24"
+
+  Szenario: Ausleihe überfällig (BR-11, BR-35)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-003" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-003" hat die Rückgabefrist "2026-08-28"
+    Und die Ausleihe "a-003" wurde noch nicht verlängert
+    Und für die Kategorie "Bohrhammer" liegt keine offene Vormerkung vor
+    Wenn POST /ausleihen/a-003/verlaengerung mit Header X-Role: mitglied aufgerufen wird
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "AUSLEIHE_UEBERFAELLIG"
+    Und die Rückgabefrist der Ausleihe "a-003" bleibt unverändert "2026-08-28"
+
+  Szenario: Offene Vormerkung für die Kategorie (BR-11)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-004" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-004" hat die Rückgabefrist "2026-09-10"
+    Und die Ausleihe "a-004" wurde noch nicht verlängert
+    Und für die Kategorie "Bohrhammer" liegt eine offene Vormerkung von Mitglied "m0999" vor
+    Wenn POST /ausleihen/a-004/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "VORMERKUNG_OFFEN"
+    Und die Rückgabefrist der Ausleihe "a-004" bleibt unverändert "2026-09-10"
+
+  Szenario: Kombination – überfällig UND offene Vormerkung (BR-11)
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-005" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-005" hat die Rückgabefrist "2026-08-28"
+    Und die Ausleihe "a-005" wurde noch nicht verlängert
+    Und für die Kategorie "Bohrhammer" liegt eine offene Vormerkung von Mitglied "m0999" vor
+    Wenn POST /ausleihen/a-005/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "AUSLEIHE_UEBERFAELLIG"
+
+  Szenario: Mitglied verlängert eigene Ausleihe selbst
+    Angenommen Mitglied "m0815" hat eine aktive Ausleihe "a-006" auf einen Gegenstand der Kategorie "Bohrhammer"
+    Und die Ausleihe "a-006" hat die Rückgabefrist "2026-09-08"
+    Und die Ausleihe "a-006" wurde noch nicht verlängert
+    Und für die Kategorie "Bohrhammer" liegt keine offene Vormerkung vor
+    Wenn POST /ausleihen/a-006/verlaengerung mit Header X-Role: mitglied aufgerufen wird
+    Dann antwortet das System mit HTTP 200
+    Und die Rückgabefrist der Ausleihe "a-006" ist "2026-09-22"
+    Und das Feld "verlaengert" der Ausleihe "a-006" ist "true"
+
+  Szenario: Ausleihe nicht gefunden
+    Wenn POST /ausleihen/nicht-vorhanden-uuid/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 404
+    Und der Fehlercode lautet "AUSLEIHE_NICHT_GEFUNDEN"
+
+  Szenario: Ausleihe bereits abgeschlossen
+    Angenommen die Ausleihe "a-007" ist abgeschlossen (Prüfprotokoll liegt vor)
+    Wenn POST /ausleihen/a-007/verlaengerung mit Header X-Role: thekendienst aufgerufen wird
+    Dann antwortet das System mit HTTP 409
+    Und der Fehlercode lautet "AUSLEIHE_NICHT_AKTIV"
+----
+
+---
+
+=== EARS-Anforderungen
+
+==== Kategorien-Legende
+
+[horizontal]
+UBIQUITOUS::  Stets gültige Systemanforderung.
+EVENT-DRIVEN:: Das System soll auf ein Ereignis reagieren.
+STATE-DRIVEN:: Das System soll in einem definierten Zustand ein Verhalten zeigen.
+UNWANTED::     Das System soll ein unerwünschtes Verhalten verhindern.
+OPTIONAL::     Das System kann ein Verhalten anbieten.
+
+---
+
+==== REQ-UC02-01 — Verlängerung durchführen (Event-Driven)
+
+_Wenn_ ein Aufrufer `POST /ausleihen/{ausleihe_id}/verlaengerung` aufruft und alle Vorbedingungen erfüllt sind (aktive Ausleihe, noch nicht verlängert, nicht überfällig, keine offene Vormerkung auf die Kategorie), _soll_ das System die Rückgabefrist der Ausleihe um die volle Leihdauer der Kategorie verlängern, das Feld `verlaengert` auf `true` setzen und HTTP 200 mit der aktualisierten Ausleihe-Ressource zurückgeben.
+
+_Referenz: BR-10, BR-11_
+
+---
+
+==== REQ-UC02-02 — Einmaligkeit der Verlängerung (Unwanted)
+
+_Das System soll verhindern_, dass eine Ausleihe, deren Feld `verlaengert` den Wert `true` trägt, erneut verlängert wird. Bei einem solchen Versuch antwortet das System mit HTTP 409 und Fehlercode `BEREITS_VERLAENGERT`; die Ausleihe bleibt unverändert.
+
+_Referenz: BR-10_
+
+---
+
+==== REQ-UC02-03 — Sperrung bei Überfälligkeit (Unwanted)
+
+_Das System soll verhindern_, dass eine Ausleihe verlängert wird, deren Rückgabefrist vor dem aktuellen Datum liegt. Bei einem solchen Versuch antwortet das System mit HTTP 409 und Fehlercode `AUSLEIHE_UEBERFAELLIG`; die Ausleihe bleibt unverändert.
+
+_Referenz: BR-11, BR-35_
+
+---
+
+==== REQ-UC02-04 — Sperrung bei offener Vormerkung (Unwanted)
+
+_Das System soll verhindern_, dass eine Ausleihe verlängert wird, wenn für die Kategorie des ausgeliehenen Gegenstands mindestens eine offene Vormerkung in der Warteschlange steht. Bei einem solchen Versuch antwortet das System mit HTTP 409 und Fehlercode `VORMERKUNG_OFFEN`; die Ausleihe bleibt unverändert.
+
+_Referenz: BR-11, BR-27, BR-29_
+
+---
+
+==== REQ-UC02-05 — Fristberechnung (Ubiquitous)
+
+Das System berechnet die neue Rückgabefrist einer Verlängerung stets als `bestehende_rückgabefrist + leihdauer_tage_der_kategorie`. Die Leihdauer wird aus dem Kategoriedatensatz gelesen, nicht als Eingabeparameter entgegengenommen.
+
+_Referenz: BR-10, BR-02_
+
+---
+
+==== REQ-UC02-06 — Audit-Eintrag bei Verlängerung (Ubiquitous)
+
+Jede erfolgreiche Verlängerung erzeugt einen Audit-Eintrag, der mindestens enthält: Zeitstempel (UTC), `ausleihe_id`, `aktion = "VERLAENGERUNG"`, alte Rückgabefrist, neue Rückgabefrist.
+
+_Referenz: PRD — Nachvollziehbarkeit_
+
+---
+
+==== REQ-UC02-07 — Datumsquelle austauschbar (Ubiquitous)
+
+Das System liest das aktuelle Datum zur Prüfung der Überfälligkeit ausschließlich über eine austauschbare Datumsquelle (kein direkter Systemaufruf), damit Fristen in automatisierten Tests deterministisch gesteuert werden können.
+
+_Referenz: PRD — Zeit_
+
+---
+
+==== REQ-UC02-08 — Antwortzeit (State-Driven)
+
+_Während_ das System unter Normallast (bis zu 800 Mitglieder, bis zu 400 aktive Gegenstände) betrieben wird, _soll_ der Endpunkt `POST /ausleihen/{ausleihe_id}/verlaengerung` am 95. Perzentil innerhalb von 300 ms antworten.
+
+_Referenz: PRD — Qualitätsziele / Antwortzeit_
+
+---
+
+==== REQ-UC02-09 — Rollenunabhängige Verfügbarkeit (Ubiquitous)
+
+Der Endpunkt `POST /ausleihen/{ausleihe_id}/verlaengerung` ist für die Rollen `thekendienst` und `mitglied` verfügbar. Der Wert des Headers `X-Role` wird nicht kryptographisch geprüft. Die fachliche Prüfung aller Verlängerungsbedingungen ist rollenunabhängig identisch.
+
+_Referenz: PRD — Authentifizierung_

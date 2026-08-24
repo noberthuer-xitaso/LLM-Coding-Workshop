@@ -1,0 +1,215 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: Geschäftsregeln — Leihgut
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 2
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== Geschäftsregeln — Leihgut
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+Dieser Katalog enthält alle atomaren Geschäftsregeln des Systems Leihgut.
+Jede Regel trägt eine stabile BR-ID, die in Spezifikation, Tests und Code referenziert wird.
+
+=== Katalog
+
+==== BR-01 — Inventarnummer eindeutig
+
+Jeder Gegenstand hat eine eindeutige Inventarnummer und gehört zu genau einer Kategorie.
+
+==== BR-02 — Kategorie bestimmt Parameter
+
+Die Kategorie bestimmt die Leihdauer in Tagen, das Wartungsintervall in Ausleihen und die Einweisungspflicht (ja/nein).
+
+==== BR-03 — Wiederbeschaffungswert
+
+Jeder Gegenstand hat einen Wiederbeschaffungswert in Euro (positiver Ganzbetrag).
+
+==== BR-04 — Kautionsberechnung
+
+Die Kaution beträgt 20 Prozent des Wiederbeschaffungswerts, kaufmännisch gerundet auf ganze Euro, mindestens 5 Euro und höchstens 100 Euro.
+
+=== Ausleihe
+
+==== BR-05 — Ausgabebedingung: Zustand
+
+Ein Gegenstand wird nur ausgegeben, wenn er den Zustand "verfügbar" oder "reserviert für dieses Mitglied" hat.
+
+==== BR-06 — Ausgabebedingung: Ausleihlimit
+
+Ein Mitglied darf höchstens drei Ausleihen gleichzeitig führen.
+Vormerkungen zählen nicht mit.
+
+==== BR-07 — Ausgabebedingung: Sperre
+
+Ein gesperrtes Mitglied leiht nicht aus.
+
+==== BR-08 — Ausgabebedingung: Einweisung
+
+Ein einweisungspflichtiger Gegenstand wird nur an ein Mitglied ausgegeben, für dessen Konto eine dokumentierte Einweisung für diese Kategorie vorliegt.
+
+==== BR-09 — Ausleihe anlegen
+
+Mit der Ausgabe wird die Kaution hinterlegt und die Rückgabefrist gesetzt: Ausgabedatum plus Leihdauer der Kategorie.
+
+==== BR-10 — Verlängerung: einmalig
+
+Eine Verlängerung um die volle Leihdauer der Kategorie ist einmal je Ausleihe möglich.
+
+==== BR-11 — Verlängerung: Ausschlussbedingungen
+
+Eine Verlängerung ist ausgeschlossen, wenn für die Kategorie eine Vormerkung offen ist oder die Ausleihe bereits überfällig ist.
+
+_Begründung: Sonst hält der erste Ausleiher den Gegenstand beliebig lange, und die Vormerkung ist wertlos._
+
+=== Rückgabe und Prüfung
+
+==== BR-12 — Rückgabe versetzt in Prüfung
+
+Die Rückgabe an der Theke versetzt den Gegenstand in den Zustand "in Prüfung".
+Sie beendet die Ausleihe nicht.
+
+==== BR-13 — Auffälligkeiten bei Rückgabe
+
+Die Theke erfasst bei der Rückgabe Auffälligkeiten als Freitext, entscheidet aber nicht über die Kaution.
+
+==== BR-14 — Prüfung durch den Wart
+
+Der Wart führt die Prüfung durch und erstellt das Prüfprotokoll.
+
+_Begründung: Gleichbehandlung. Wer dem Mitglied gegenübersteht, soll nicht über dessen Geld entscheiden._
+
+==== BR-15 — Prüfprotokoll schließt Ausleihe ab
+
+Das Prüfprotokoll schließt die Ausleihe ab und legt den Kautionsabzug fest.
+
+==== BR-16 — Schadenszurechnung
+
+Ein Schaden wird der laufenden Ausleihe zugerechnet, es sei denn, er ist im Prüfprotokoll einer früheren Ausleihe für denselben Gegenstand bereits vermerkt.
+
+_Begründung: Das Prüfprotokoll ist die einzige belastbare Quelle. Alles andere wäre Aussage gegen Aussage._
+
+==== BR-17 — Nachzustand nach Prüfung
+
+Nach der Prüfung geht der Gegenstand in genau einen dieser Zustände: verfügbar, wartungsfällig oder ausgemustert.
+
+==== BR-18 — Prüfprotokoll-Felder
+
+Ein Prüfprotokoll enthält:
+
+* Zeitstempel
+* Wart-ID
+* Ausleihe-ID
+* Gegenstand-ID
+* Kautionsabzug in ganzen Euro
+* Nachzustand (Enum: `verfügbar` | `wartungsfällig` | `ausgemustert` | `verloren`)
+* Freitext-Begründung (optional)
+
+Der Nachzustand wird explizit gesetzt, nicht aus anderen Feldern abgeleitet.
+
+==== BR-19 — Verloren erklären
+
+Der Wart kann einen Gegenstand als verloren erklären, ohne dass eine körperliche Rückgabe vorausgegangen ist.
+Er erstellt dazu ein Prüfprotokoll mit Nachzustand `verloren`.
+Die Ausleihe wird dadurch abgeschlossen; die Kaution wird vollständig einbehalten; der Gegenstand wird ausgemustert.
+
+=== Kaution
+
+==== BR-20 — Kautionsbewegung bei Ausgabe
+
+Die Kaution wird bei der Ausgabe hinterlegt und mit dem Abschluss des Prüfprotokolls ganz oder teilweise freigegeben.
+
+==== BR-21 — Abzugsobergrenze
+
+Ein Kautionsabzug ist höchstens so hoch wie die hinterlegte Kaution.
+
+==== BR-22 — Audit-Eintrag je Kautionsbewegung
+
+Jede Kautionsbewegung — Hinterlegung, Abzug, Freigabe — erzeugt einen Audit-Eintrag mit Zeitstempel, Betrag in ganzen Euro und Auslöser (Referenz auf Ausleihe-ID oder Prüfprotokoll-ID).
+
+=== Wartung
+
+==== BR-23 — Nutzungszähler
+
+Jede abgeschlossene Ausleihe erhöht den Nutzungszähler des Gegenstands um eins.
+
+==== BR-24 — Wartungsfälligkeit durch Zähler
+
+Erreicht der Nutzungszähler das Wartungsintervall der Kategorie, wird der Gegenstand nach Abschluss des Prüfprotokolls wartungsfällig statt verfügbar.
+
+_Begründung: Nutzung lässt sich zählen; Betriebsstunden kann niemand an der Theke messen._
+
+==== BR-25 — Wartung abschließen
+
+Der Wart schließt eine Wartung mit einer eigenständigen Aktion ab ("Wartung abschließen").
+Diese Aktion ist kein Prüfprotokoll und gehört zu keiner Ausleihe.
+Sie setzt den Nutzungszähler auf null und den Gegenstandszustand auf verfügbar.
+
+==== BR-26 — Ausgabesperre bei Wartungsfälligkeit
+
+Ein wartungsfälliger Gegenstand wird nicht ausgegeben und nicht reserviert.
+
+=== Vormerkung
+
+==== BR-27 — Vormerkung für Kategorie
+
+Eine Vormerkung gilt für eine Kategorie, nicht für einen einzelnen Gegenstand.
+
+==== BR-28 — Einmaligkeit je Kategorie
+
+Ein Mitglied darf je Kategorie höchstens eine Vormerkung haben.
+
+==== BR-29 — Warteschlange nach Eingangszeit
+
+Vormerkungen einer Kategorie bilden eine Warteschlange, geordnet nach Eingangszeit (FIFO).
+
+==== BR-30 — Reservierung bei Verfügbarkeit
+
+Wird ein Gegenstand nach Abschluss des Prüfprotokolls verfügbar und liegt eine Vormerkung für die Kategorie vor, wird er für das erste Mitglied der Warteschlange reserviert.
+
+==== BR-31 — Reservierungsverfall
+
+Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung.
+Der Gegenstand geht dann an das nächste Mitglied der Warteschlange oder wird verfügbar, wenn keine weitere Vormerkung vorliegt.
+
+==== BR-32 — Wartungsfälligkeit lässt Warteschlange unberührt
+
+Wird ein Gegenstand nach Prüfung wartungsfällig, bleibt die Warteschlange unverändert.
+Es entsteht keine Reservierung.
+
+==== BR-33 — Sperre überspringt Reservierung, behält Platz
+
+Ein gesperrtes Mitglied darf vormerken, aber nicht abholen.
+Eine für ein gesperrtes Mitglied entstehende Reservierung wird übersprungen; das Mitglied behält seinen Platz in der Warteschlange.
+
+_Begründung: Die Sperre soll zur Rückgabe bewegen, nicht den Platz in der Schlange kosten._
+
+=== Sperre
+
+==== BR-34 — Eintritt der Sperre
+
+Ein Mitglied ist gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist.
+
+==== BR-35 — Definition Überfälligkeit
+
+Überfällig heißt: Die Rückgabefrist liegt vor dem heutigen Datum, und der Gegenstand ist nicht zurückgegeben.
+
+==== BR-36 — Ende der Sperre
+
+Die Sperre endet, wenn für alle überfälligen Ausleihen des Mitglieds das Prüfprotokoll abgeschlossen ist.

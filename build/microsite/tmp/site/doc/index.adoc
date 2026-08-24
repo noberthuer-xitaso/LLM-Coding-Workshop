@@ -1,0 +1,33 @@
+= Leihgut — Spezifikation
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+Willkommen bei der Spezifikation des Systems *Leihgut* — Werkzeugverleih einer Bibliothek der Dinge.
+
+== Grundlagen
+
+* link:specs/prd.html[PRD: Produktanforderungen]
+* link:specs/business-rules.html[Geschäftsregeln BR-01–BR-36]
+
+== Use Cases
+
+* link:specs/uc-01-ausleihe.html[UC-01: Gegenstand ausleihen]
+* link:specs/uc-02-verlaengerung.html[UC-02: Ausleihe verlängern]
+* link:specs/uc-03-rueckgabe.html[UC-03: Gegenstand zurücknehmen]
+* link:specs/uc-04-pruefprotokoll.html[UC-04: Prüfprotokoll erstellen]
+* link:specs/uc-05-vormerkung.html[UC-05: Gegenstand vormerken]
+* link:specs/uc-06-wartung.html[UC-06: Wartung abschließen]
+* link:specs/uc-07-verloren.html[UC-07: Gegenstand als verloren erklären]
+* link:specs/uc-08-katalog.html[UC-08: Katalog pflegen]
+* link:specs/uc-09-einweisung.html[UC-09: Einweisung dokumentieren]
+
+== Supplementary Specifications
+
+* link:specs/supplementary-entity-model.html[Entity Model & Zustandsautomaten]
+* link:specs/supplementary-interface-contract.html[Interface Contract (REST-API & CLI)]
+* link:specs/supplementary-validation-rules.html[Validation Rules & BR-Traceability]
+* link:specs/supplementary-system-events.html[System Events (Automatische Prozesse)]

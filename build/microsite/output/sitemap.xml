@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-04-pruefprotokoll.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/supplementary-entity-model.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/prd.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-01-ausleihe.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/business-rules.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/supplementary-interface-contract.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-08-katalog.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-03-rueckgabe.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/supplementary-validation-rules.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-05-vormerkung.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/supplementary-system-events.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-09-einweisung.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-06-wartung.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-07-verloren.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/specs/uc-02-verlaengerung.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/search.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+    <url>
+    	<loc>http://jbake.org/lunrjsindex.html</loc>
+    	<lastmod>2026-08-24</lastmod>
+    </url>
+
+</urlset>

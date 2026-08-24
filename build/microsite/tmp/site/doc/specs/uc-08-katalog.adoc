@@ -1,0 +1,1294 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: UC-08: Katalog pflegen
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 3
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== UC-08: Katalog pflegen
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+:source-highlighter: rouge
+
+=== Persona Use Cases (Cockburn Fully Dressed)
+
+==== UC-08a: Kategorie pflegen
+
+===== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID          |UC-08a
+|Name           |Kategorie pflegen
+|Scope          |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level          |Summary
+|Primary Actor  |Rolf (Wart)
+|Unterstützte Personas |Karim (Thekendienst) — liest Kategorien; Sabine (Mitglied) — profitiert von korrekten Leihdauern
+|===
+
+===== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interessen
+
+|Rolf (Wart)
+|Kategorien mit korrekten Parametern anlegen und aktualisieren können. Sicherstellen, dass laufende Ausleihen durch Änderungen nicht inkonsistent werden.
+
+|Karim (Thekendienst)
+|Jederzeit aktuelle und vollständige Kategorieübersicht abrufen können.
+
+|Verein
+|Kategoriedaten als verlässliche Grundlage für Ausleihe, Wartung und Kautionsberechnung. Keine Datenverluste oder Inkonsistenzen durch Änderungen an aktiven Kategorien.
+|===
+
+===== Vorbedingungen
+
+. Rolf ist im System mit der Rolle `wart` identifiziert (Header `X-Role: wart`).
+. Bei Änderungen: Die Kategorie-ID ist bekannt.
+
+===== Nachbedingungen (Erfolgsgarantie)
+
+Bei erfolgreicher Anlage::
+. Die Kategorie ist im System persistiert mit eindeutiger ID, Name, Leihdauer in Tagen, Wartungsintervall in Ausleihen, Einweisungspflicht (ja/nein).
+. Die Kategorie steht für die Zuordnung neuer Gegenstände zur Verfügung.
+
+Bei erfolgreicher Änderung::
+. Die geänderten Felder (Name, Leihdauer, Wartungsintervall, Einweisungspflicht) sind persistiert.
+. Laufende Ausleihen behalten ihre ursprünglich berechnete Rückgabefrist (Leihdaueränderungen betreffen nur neue Ausleihen).
+
+===== Hauptszenario: Kategorie anlegen
+
+Akteur: Rolf (Wart).
+
+. Rolf entscheidet, eine neue Kategorie anzulegen (z. B. „Kettensäge").
+. Rolf sendet eine Anfrage mit Name, Leihdauer, Wartungsintervall und Einweisungspflicht.
+. *[BR-02]* Das System prüft, dass alle Pflichtfelder vorhanden und gültig sind.
+. Das System legt die Kategorie an und vergibt eine eindeutige Kategorie-ID.
+. Das System bestätigt die Anlage mit der erzeugten Kategorie-ID und allen gespeicherten Feldern.
+
+===== Hauptszenario: Kategorie ändern
+
+Akteur: Rolf (Wart).
+
+. Rolf ruft die bestehende Kategorie über ihre ID ab.
+. Rolf sendet eine Aktualisierungsanfrage mit den zu ändernden Feldern.
+. *[BR-02]* Das System prüft die Gültigkeit der neuen Feldwerte.
+. Das System persistiert die Änderungen.
+. Das System bestätigt die Änderung mit den aktualisierten Kategorieinformationen.
+
+NOTE: Eine Änderung der Leihdauer betrifft ausschließlich neue Ausleihen. Bereits laufende Ausleihen behalten ihre ursprüngliche Rückgabefrist.
+
+===== Hauptszenario: Kategorien lesen
+
+Akteur: Karim (Thekendienst) oder Rolf (Wart).
+
+. Karim ruft die Kategorieübersicht oder eine einzelne Kategorie per ID ab.
+. Das System liefert die Kategoriedaten mit allen Feldern zurück.
+
+===== Erweiterungen
+
+====== 3a — Name bereits vorhanden (Anlage)
+
+. Das System erkennt, dass eine Kategorie mit demselben Namen bereits existiert.
+. Das System verweigert die Anlage mit Fehlercode `KATEGORIE_NAME_DOPPELT`.
+. Use Case endet ohne Anlage.
+
+====== 3b — Ungültige Feldwerte (Anlage oder Änderung)
+
+. Ein Pflichtfeld fehlt, oder ein numerischer Wert ist nicht positiv (z. B. Leihdauer ≤ 0).
+. Das System verweigert die Anfrage mit Fehlercode `EINGABE_UNGUELTIG` und benennt das fehlerhafte Feld.
+. Use Case endet ohne Persistierung.
+
+====== 3c — Kategorie nicht gefunden (Änderung oder Lesen)
+
+. Die angegebene Kategorie-ID ist im System unbekannt.
+. Das System gibt Fehlercode `KATEGORIE_NICHT_GEFUNDEN` zurück.
+. Use Case endet.
+
+---
+
+==== UC-08b: Gegenstand pflegen
+
+===== Steckbrief
+
+[cols="1,3"]
+|===
+|UC-ID          |UC-08b
+|Name           |Gegenstand pflegen
+|Scope          |Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+|Level          |Summary
+|Primary Actor  |Rolf (Wart)
+|Unterstützte Personas |Karim (Thekendienst) — liest Gegenstände inkl. Kaution
+|===
+
+===== Stakeholder und Interessen
+
+[cols="1,3"]
+|===
+|Stakeholder |Interessen
+
+|Rolf (Wart)
+|Gegenstände mit korrekter Inventarnummer, Kategorie und Wiederbeschaffungswert anlegen und aktualisieren. Gegenstände ausmustern, sofern keine aktive Ausleihe besteht.
+
+|Karim (Thekendienst)
+|Gegenstandsdetails inkl. berechneter Kaution sofort abrufen können, ohne selbst rechnen zu müssen (BR-04).
+
+|Verein
+|Vollständiger, aktueller Katalog als Grundlage für Ausleihe, Kautionsberechnung und Wartungsplanung.
+|===
+
+===== Vorbedingungen
+
+. Rolf ist im System mit der Rolle `wart` identifiziert (Header `X-Role: wart`).
+. Bei Anlage: Die zu verwendende Kategorie-ID existiert im System.
+. Bei Änderung: Die Inventarnummer des Gegenstands ist bekannt.
+
+===== Nachbedingungen (Erfolgsgarantie)
+
+Bei erfolgreicher Anlage::
+. Der Gegenstand ist persistiert mit eindeutiger Inventarnummer, Kategorie-ID, Wiederbeschaffungswert und Anfangszustand `verfügbar`.
+. *[BR-01]* Die Inventarnummer ist systemweit eindeutig.
+
+Bei erfolgreicher Änderung::
+. Die geänderten Felder (Wiederbeschaffungswert, Kategorie-ID) sind persistiert.
+. Der Gegenstandszustand bleibt unverändert, sofern nicht explizit geändert.
+
+Bei erfolgreicher Ausmusterung::
+. Der Gegenstandszustand ist `ausgemustert`.
+. *[BR-01]* Die Inventarnummer bleibt im System erhalten (keine Löschung, nur Statuswechsel).
+
+===== Hauptszenario: Gegenstand anlegen
+
+Akteur: Rolf (Wart).
+
+. Rolf entscheidet, einen neuen Gegenstand anzulegen.
+. Rolf sendet eine Anfrage mit Inventarnummer, Kategorie-ID und Wiederbeschaffungswert.
+. *[BR-01]* Das System prüft die Eindeutigkeit der Inventarnummer.
+. Das System prüft, dass die Kategorie-ID existiert.
+. *[BR-03]* Das System prüft, dass der Wiederbeschaffungswert ein positiver Ganzbetrag ist.
+. Das System legt den Gegenstand mit Anfangszustand `verfügbar` und Nutzungszähler 0 an.
+. Das System bestätigt die Anlage mit allen gespeicherten Feldern inkl. berechneter Kaution (BR-04).
+
+===== Hauptszenario: Gegenstand ändern
+
+Akteur: Rolf (Wart).
+
+. Rolf ruft den bestehenden Gegenstand über seine Inventarnummer ab.
+. Rolf sendet eine Aktualisierungsanfrage mit den zu ändernden Feldern.
+. Das System prüft die Gültigkeit der neuen Feldwerte (Kategorie-ID existiert, Wiederbeschaffungswert positiv).
+. Das System persistiert die Änderungen.
+. Das System bestätigt die Änderung mit den aktualisierten Gegenstandsdaten inkl. neu berechneter Kaution.
+
+===== Hauptszenario: Gegenstände lesen
+
+Akteur: Karim (Thekendienst) oder Rolf (Wart).
+
+. Karim ruft die Gegenstandsübersicht oder einen einzelnen Gegenstand per Inventarnummer ab.
+. *[BR-04]* Das System liefert die Gegenstandsdaten mit allen Feldern zurück, einschließlich des berechneten Kautionsbetrags als berechnetes Feld.
+
+===== Erweiterungen
+
+====== 3a — Inventarnummer bereits vorhanden (Anlage)
+
+. Das System erkennt, dass ein Gegenstand mit derselben Inventarnummer bereits existiert.
+. Das System verweigert die Anlage mit Fehlercode `INVENTARNUMMER_DOPPELT`.
+. Use Case endet ohne Anlage.
+
+====== 4a — Kategorie nicht gefunden (Anlage oder Änderung)
+
+. Die angegebene Kategorie-ID ist im System unbekannt.
+. Das System verweigert die Anfrage mit Fehlercode `KATEGORIE_NICHT_GEFUNDEN`.
+. Use Case endet ohne Persistierung.
+
+====== Ausmusterung — Gegenstand hat aktive Ausleihen
+
+. Rolf versucht, einen Gegenstand über PUT in den Zustand `ausgemustert` zu versetzen.
+. Das System prüft, ob der Gegenstand aktive Ausleihen hat (Zustand `ausgeliehen` oder `in_pruefung`).
+. Der Gegenstand hat mindestens eine aktive Ausleihe.
+. Das System verweigert die Ausmusterung mit Fehlercode `GEGENSTAND_HAT_AKTIVE_AUSLEIHEN`.
+. Use Case endet ohne Statuswechsel.
+
+====== 2b — Gegenstand nicht gefunden (Änderung oder Lesen)
+
+. Die angegebene Inventarnummer ist im System unbekannt.
+. Das System gibt Fehlercode `GEGENSTAND_NICHT_GEFUNDEN` zurück.
+. Use Case endet.
+
+---
+
+=== System Use Cases
+
+==== Kategorien-Endpunkte
+
+===== POST /kategorien
+
+Legt eine neue Kategorie an.
+Nur die Rolle `wart` darf diesen Endpunkt aufrufen.
+
+====== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`name`
+|string
+|ja
+|Eindeutiger Name der Kategorie (z. B. „Kettensäge"). Nicht leer, max. 100 Zeichen.
+
+|`leihdauerTage`
+|integer
+|ja
+|Leihdauer in Tagen. Muss ≥ 1 sein. (BR-02)
+
+|`wartungsintervallAusleihen`
+|integer
+|ja
+|Anzahl Ausleihen bis zur Wartungsfälligkeit. Muss ≥ 1 sein. (BR-02)
+
+|`einweisungspflichtig`
+|boolean
+|ja
+|`true` wenn eine Einweisung erforderlich ist, sonst `false`. (BR-02)
+|===
+
+HTTP-Header:
+
+[source]
+----
+X-Role: wart
+Content-Type: application/json
+----
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "name": "Kettensäge",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+====== Validierung
+
+[cols="2,3,2"]
+|===
+|Feld |Regel |Fehlercode
+
+|`name`
+|Nicht leer, max. 100 Zeichen, systemweit eindeutig
+|`EINGABE_UNGUELTIG` / `KATEGORIE_NAME_DOPPELT`
+
+|`leihdauerTage`
+|Integer ≥ 1
+|`EINGABE_UNGUELTIG`
+
+|`wartungsintervallAusleihen`
+|Integer ≥ 1
+|`EINGABE_UNGUELTIG`
+
+|`einweisungspflichtig`
+|Boolean (true/false)
+|`EINGABE_UNGUELTIG`
+
+|`X-Role`
+|Muss `wart` sein
+|`ROLLE_UNZULAESSIG` (HTTP 403)
+|===
+
+====== Verarbeitung
+
+. Eingabevalidierung: alle Pflichtfelder vorhanden und gültig?
+. Name auf Eindeutigkeit prüfen → `KATEGORIE_NAME_DOPPELT` (409), falls bereits vorhanden.
+. Kategorie anlegen: Kategorie-ID generieren, alle Felder persistieren.
+. Response mit HTTP 201 und Kategoriedaten zurückgeben.
+
+====== Ausgabe
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Feld |Beschreibung
+
+.5+|`201 Created`
+|`kategorieId`
+|Eindeutige ID der angelegten Kategorie
+
+|`name`
+|Name der Kategorie
+
+|`leihdauerTage`
+|Leihdauer in Tagen (BR-02)
+
+|`wartungsintervallAusleihen`
+|Wartungsintervall in Ausleihen (BR-02)
+
+|`einweisungspflichtig`
+|Einweisungspflicht ja/nein (BR-02)
+|===
+
+Beispiel-Response-Body:
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00005",
+  "name": "Kettensäge",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt, Typ falsch oder Wert außerhalb des erlaubten Bereichs
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `wart`
+
+|`409 Conflict`
+|`KATEGORIE_NAME_DOPPELT`
+|Eine Kategorie mit diesem Namen existiert bereits
+|===
+
+---
+
+===== GET /kategorien
+
+Liefert alle Kategorien.
+Zugriff für Rollen `wart` und `thekendienst`.
+
+====== Eingabe
+
+Keine Parameter erforderlich. Optionaler Query-Parameter:
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`einweisungspflichtig`
+|boolean
+|nein
+|Filtert auf Kategorien mit/ohne Einweisungspflicht
+|===
+
+====== Verarbeitung
+
+. Optionale Filterparameter auswerten.
+. Alle passenden Kategorien laden und in einer Liste zurückgeben.
+
+====== Ausgabe
+
+`200 OK` mit einem Array von Kategorieobjekten (gleiche Felder wie POST-Response).
+
+Beispiel-Response-Body:
+
+[source,json]
+----
+[
+  {
+    "kategorieId": "KAT-00001",
+    "name": "Bohrhammer",
+    "leihdauerTage": 14,
+    "wartungsintervallAusleihen": 20,
+    "einweisungspflichtig": false
+  },
+  {
+    "kategorieId": "KAT-00005",
+    "name": "Kettensäge",
+    "leihdauerTage": 7,
+    "wartungsintervallAusleihen": 10,
+    "einweisungspflichtig": true
+  }
+]
+----
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `wart` oder `thekendienst`
+|===
+
+---
+
+===== GET /kategorien/{id}
+
+Liefert eine einzelne Kategorie anhand ihrer ID.
+Zugriff für Rollen `wart` und `thekendienst`.
+
+====== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`id` (Pfadparameter)
+|string
+|ja
+|Eindeutige Kategorie-ID
+|===
+
+====== Verarbeitung
+
+. Kategorie anhand der ID laden.
+. Falls nicht gefunden → `KATEGORIE_NICHT_GEFUNDEN` (404).
+. Kategorieobjekt zurückgeben.
+
+====== Ausgabe
+
+`200 OK` mit Kategorieobjekt (gleiche Felder wie POST-Response).
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` nicht erlaubt
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Datensatz mit dieser ID
+|===
+
+---
+
+===== PUT /kategorien/{id}
+
+Aktualisiert eine bestehende Kategorie.
+Nur die Rolle `wart` darf diesen Endpunkt aufrufen.
+
+====== Eingabe
+
+Pfadparameter `id` (Kategorie-ID) plus Request-Body (gleiche Felder wie POST, alle Pflicht).
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "name": "Kettensäge",
+  "leihdauerTage": 10,
+  "wartungsintervallAusleihen": 10,
+  "einweisungspflichtig": true
+}
+----
+
+====== Validierung
+
+Wie POST /kategorien; zusätzlich: Name-Eindeutigkeitsprüfung schließt die Kategorie selbst aus.
+
+====== Verarbeitung
+
+. Kategorie anhand der ID laden → `KATEGORIE_NICHT_GEFUNDEN` (404), falls unbekannt.
+. Eingabevalidierung.
+. Name-Eindeutigkeitsprüfung (exklusive der eigenen ID) → `KATEGORIE_NAME_DOPPELT` (409).
+. Felder aktualisieren und persistieren.
+
+NOTE: Eine Änderung von `leihdauerTage` betrifft ausschließlich neue Ausleihen. Bereits laufende Ausleihen behalten ihre ursprünglich berechnete Rückgabefrist. Das System ändert keine bestehenden Ausleihen.
+
+====== Ausgabe
+
+`200 OK` mit dem aktualisierten Kategorieobjekt.
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt, Typ falsch oder Wert außerhalb des erlaubten Bereichs
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `wart`
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Datensatz mit dieser ID
+
+|`409 Conflict`
+|`KATEGORIE_NAME_DOPPELT`
+|Eine andere Kategorie trägt bereits diesen Namen
+|===
+
+---
+
+==== Gegenstände-Endpunkte
+
+===== POST /gegenstaende
+
+Legt einen neuen Gegenstand an.
+Nur die Rolle `wart` darf diesen Endpunkt aufrufen.
+
+====== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`inventarnummer`
+|string
+|ja
+|Eindeutige Inventarnummer des Gegenstands (BR-01). Nicht leer, max. 50 Zeichen.
+
+|`kategorieId`
+|string
+|ja
+|ID der zugeordneten Kategorie. Muss im System existieren. (BR-01, BR-02)
+
+|`wiederbeschaffungswert`
+|integer
+|ja
+|Wiederbeschaffungswert in ganzen Euro. Muss ≥ 1 sein. (BR-03)
+|===
+
+HTTP-Header:
+
+[source]
+----
+X-Role: wart
+Content-Type: application/json
+----
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 200
+}
+----
+
+====== Validierung
+
+[cols="2,3,2"]
+|===
+|Feld |Regel |Fehlercode
+
+|`inventarnummer`
+|Nicht leer, max. 50 Zeichen, systemweit eindeutig (BR-01)
+|`EINGABE_UNGUELTIG` / `INVENTARNUMMER_DOPPELT`
+
+|`kategorieId`
+|Nicht leer; Kategorie muss im System existieren
+|`EINGABE_UNGUELTIG` / `KATEGORIE_NICHT_GEFUNDEN`
+
+|`wiederbeschaffungswert`
+|Integer ≥ 1
+|`EINGABE_UNGUELTIG`
+
+|`X-Role`
+|Muss `wart` sein
+|`ROLLE_UNZULAESSIG` (HTTP 403)
+|===
+
+====== Verarbeitung
+
+. Eingabevalidierung: alle Pflichtfelder vorhanden und gültig?
+. *[BR-01]* Inventarnummer auf Eindeutigkeit prüfen → `INVENTARNUMMER_DOPPELT` (409), falls bereits vorhanden.
+. Kategorie-ID auf Existenz prüfen → `KATEGORIE_NICHT_GEFUNDEN` (404), falls unbekannt.
+. *[BR-03]* Wiederbeschaffungswert auf Positivität prüfen.
+. *[BR-04]* Kaution berechnen: `round(wiederbeschaffungswert * 0.20)`, Minimum 5 €, Maximum 100 €.
+. Gegenstand anlegen: Anfangszustand `verfügbar`, Nutzungszähler 0, alle Felder persistieren.
+. Response mit HTTP 201 und Gegenstandsdaten inkl. berechneter Kaution zurückgeben.
+
+====== Ausgabe
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Feld |Beschreibung
+
+.7+|`201 Created`
+|`inventarnummer`
+|Eindeutige Inventarnummer (BR-01)
+
+|`kategorieId`
+|ID der zugeordneten Kategorie
+
+|`kategorieName`
+|Name der zugeordneten Kategorie (denormalisiert für Lesbarkeit)
+
+|`wiederbeschaffungswert`
+|Wiederbeschaffungswert in Euro (BR-03)
+
+|`kaution`
+|Berechneter Kautionsbetrag in ganzen Euro (BR-04) — berechnetes Feld, nicht persistiert
+
+|`zustand`
+|Anfangszustand: `verfügbar`
+
+|`nutzungszaehler`
+|Anfangswert: `0`
+|===
+
+Beispiel-Response-Body:
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "kategorieName": "Bohrhammer",
+  "wiederbeschaffungswert": 200,
+  "kaution": 40,
+  "zustand": "verfügbar",
+  "nutzungszaehler": 0
+}
+----
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Pflichtfeld fehlt, Typ falsch oder Wert außerhalb des erlaubten Bereichs
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `wart`
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Kategorie-Datensatz mit der angegebenen ID
+
+|`409 Conflict`
+|`INVENTARNUMMER_DOPPELT`
+|Ein Gegenstand mit dieser Inventarnummer existiert bereits (BR-01)
+|===
+
+---
+
+===== GET /gegenstaende
+
+Liefert alle Gegenstände, mit optionalen Filtern.
+Zugriff für Rollen `wart` und `thekendienst`.
+
+====== Eingabe
+
+Optionale Query-Parameter:
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`kategorieId`
+|string
+|nein
+|Filtert auf Gegenstände einer bestimmten Kategorie
+
+|`zustand`
+|string
+|nein
+|Filtert auf einen bestimmten Zustand (`verfügbar`, `ausgeliehen`, `in_pruefung`, `reserviert`, `wartungsfaellig`, `ausgemustert`)
+|===
+
+====== Verarbeitung
+
+. Optionale Filterparameter auswerten und validieren.
+. Ungültiger Zustandswert → `EINGABE_UNGUELTIG` (400).
+. Alle passenden Gegenstände laden.
+. *[BR-04]* Für jeden Gegenstand die Kaution berechnen und als berechnetes Feld anhängen.
+. Liste zurückgeben.
+
+====== Ausgabe
+
+`200 OK` mit einem Array von Gegenstandsobjekten (gleiche Felder wie POST-Response).
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Ungültiger Zustandswert im Filter
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` nicht erlaubt
+|===
+
+---
+
+===== GET /gegenstaende/{inventarnummer}
+
+Liefert einen einzelnen Gegenstand anhand seiner Inventarnummer, inkl. berechneter Kaution.
+Zugriff für Rollen `wart` und `thekendienst`.
+
+====== Eingabe
+
+[cols="2,1,1,3"]
+|===
+|Parameter |Typ |Pflicht |Beschreibung
+
+|`inventarnummer` (Pfadparameter)
+|string
+|ja
+|Eindeutige Inventarnummer des Gegenstands
+|===
+
+====== Verarbeitung
+
+. Gegenstand anhand der Inventarnummer laden.
+. Falls nicht gefunden → `GEGENSTAND_NICHT_GEFUNDEN` (404).
+. *[BR-04]* Kaution berechnen: `round(wiederbeschaffungswert * 0.20)`, Minimum 5 €, Maximum 100 €.
+. Gegenstandsobjekt inkl. berechneter Kaution zurückgeben.
+
+====== Ausgabe
+
+`200 OK` mit Gegenstandsobjekt (gleiche Felder wie POST-Response, inkl. `kaution`).
+
+Beispiel-Response-Body:
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-00042",
+  "kategorieId": "KAT-00001",
+  "kategorieName": "Bohrhammer",
+  "wiederbeschaffungswert": 200,
+  "kaution": 40,
+  "zustand": "verfügbar",
+  "nutzungszaehler": 3
+}
+----
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` nicht erlaubt
+
+|`404 Not Found`
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+|===
+
+---
+
+===== PUT /gegenstaende/{inventarnummer}
+
+Aktualisiert einen bestehenden Gegenstand.
+Nur die Rolle `wart` darf diesen Endpunkt aufrufen.
+
+====== Eingabe
+
+Pfadparameter `inventarnummer` plus Request-Body:
+
+[cols="2,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Beschreibung
+
+|`kategorieId`
+|string
+|ja
+|ID der zugeordneten Kategorie. Muss im System existieren.
+
+|`wiederbeschaffungswert`
+|integer
+|ja
+|Wiederbeschaffungswert in ganzen Euro. Muss ≥ 1 sein. (BR-03)
+
+|`zustand`
+|string
+|nein
+|Darf nur `ausgemustert` sein, wenn explizit gesetzt. Alle anderen Zustandsübergänge erfolgen über dedizierte Endpunkte.
+|===
+
+Beispiel-Request-Body:
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 220
+}
+----
+
+Beispiel für Ausmusterung:
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-00001",
+  "wiederbeschaffungswert": 220,
+  "zustand": "ausgemustert"
+}
+----
+
+====== Validierung
+
+[cols="2,3,2"]
+|===
+|Feld |Regel |Fehlercode
+
+|`kategorieId`
+|Nicht leer; Kategorie muss im System existieren
+|`KATEGORIE_NICHT_GEFUNDEN`
+
+|`wiederbeschaffungswert`
+|Integer ≥ 1
+|`EINGABE_UNGUELTIG`
+
+|`zustand`
+|Falls angegeben: nur `ausgemustert` erlaubt
+|`EINGABE_UNGUELTIG`
+
+|`X-Role`
+|Muss `wart` sein
+|`ROLLE_UNZULAESSIG` (HTTP 403)
+|===
+
+====== Verarbeitung
+
+. Gegenstand anhand der Inventarnummer laden → `GEGENSTAND_NICHT_GEFUNDEN` (404), falls unbekannt.
+. Eingabevalidierung.
+. Kategorie-ID auf Existenz prüfen → `KATEGORIE_NICHT_GEFUNDEN` (404).
+. Falls `zustand = ausgemustert`:
+.. Prüfen, ob der Gegenstand aktive Ausleihen hat (Zustand `ausgeliehen` oder `in_pruefung`) → `GEGENSTAND_HAT_AKTIVE_AUSLEIHEN` (422).
+.. Zustand auf `ausgemustert` setzen.
+. Felder aktualisieren und persistieren.
+. *[BR-04]* Kaution anhand des neuen Wiederbeschaffungswerts neu berechnen.
+. Response mit HTTP 200 und aktualisierten Gegenstandsdaten inkl. neu berechneter Kaution zurückgeben.
+
+====== Ausgabe
+
+`200 OK` mit dem aktualisierten Gegenstandsobjekt inkl. neu berechneter Kaution.
+
+====== Fehlerfälle
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Fehlercode |Ursache
+
+|`400 Bad Request`
+|`EINGABE_UNGUELTIG`
+|Ungültiger Feldwert oder unerlaubter Zustandswert
+
+|`403 Forbidden`
+|`ROLLE_UNZULAESSIG`
+|Header `X-Role` ist nicht `wart`
+
+|`404 Not Found`
+|`GEGENSTAND_NICHT_GEFUNDEN`
+|Kein Gegenstand mit dieser Inventarnummer
+
+|`404 Not Found`
+|`KATEGORIE_NICHT_GEFUNDEN`
+|Kein Kategorie-Datensatz mit der angegebenen ID
+
+|`422 Unprocessable Entity`
+|`GEGENSTAND_HAT_AKTIVE_AUSLEIHEN`
+|Ausmusterung nicht möglich: Gegenstand ist ausgeliehen oder in Prüfung
+|===
+
+Fehler-Response-Body (einheitliches Format):
+
+[source,json]
+----
+{
+  "fehlercode": "GEGENSTAND_HAT_AKTIVE_AUSLEIHEN",
+  "meldung": "Der Gegenstand INV-00042 kann nicht ausgemustert werden, da er sich im Zustand 'ausgeliehen' befindet.",
+  "kontext": {
+    "inventarnummer": "INV-00042",
+    "zustand": "ausgeliehen"
+  }
+}
+----
+
+---
+
+=== Aktivitätsdiagramme (PlantUML)
+
+==== Diagramm 1: Kategorie anlegen
+
+[plantuml, uc08a-kategorie-anlegen, svg]
+----
+@startuml UC-08a Kategorie anlegen
+skinparam defaultFontName monospaced
+skinparam swimlaneWidth 260
+
+|Wart (Rolf)|
+start
+:Name, Leihdauer,\nWartungsintervall,\nEinweisungspflicht eingeben;
+:POST /kategorien senden;
+
+|System|
+:Eingabe validieren;
+if (Pflichtfelder\nvollständig und gültig?) then (nein)
+  :HTTP 400\nEINGABE_UNGUELTIG;
+  stop
+endif
+
+if (Name\nalreadyexists?) then (ja)
+  :HTTP 409\nKATEGORIE_NAME_DOPPELT;
+  stop
+endif
+
+:Kategorie-ID generieren;
+:Kategorie persistieren\n[BR-02];
+:HTTP 201\nKategorieobjekt zurückgeben;
+
+|Wart (Rolf)|
+:Kategorie-ID notieren\nfür Gegenstandsanlage;
+stop
+
+@enduml
+----
+
+==== Diagramm 2: Gegenstand anlegen
+
+[plantuml, uc08b-gegenstand-anlegen, svg]
+----
+@startuml UC-08b Gegenstand anlegen
+skinparam defaultFontName monospaced
+skinparam swimlaneWidth 260
+
+|Wart (Rolf)|
+start
+:Inventarnummer, Kategorie-ID,\nWiederbeschaffungswert eingeben;
+:POST /gegenstaende senden;
+
+|System|
+:Eingabe validieren;
+if (Pflichtfelder\nvollständig und gültig?) then (nein)
+  :HTTP 400\nEINGABE_UNGUELTIG;
+  stop
+endif
+
+if (Inventarnummer\nbereits vorhanden?\n[BR-01]) then (ja)
+  :HTTP 409\nINVENTARNUMMER_DOPPELT;
+  stop
+endif
+
+if (Kategorie-ID\nexistiert?) then (nein)
+  :HTTP 404\nKATEGORIE_NICHT_GEFUNDEN;
+  stop
+endif
+
+:Kaution berechnen\n[BR-04]\n20% WBW, min 5€, max 100€;
+:Gegenstand anlegen\nZustand: verfügbar\nNutzungszähler: 0\n[BR-01, BR-03];
+:HTTP 201\nGegenstandsdaten +\nKaution zurückgeben;
+
+|Wart (Rolf)|
+:Anlagebestätigung prüfen;
+stop
+
+@enduml
+----
+
+==== Diagramm 3: Gegenstand ausmustern
+
+[plantuml, uc08c-gegenstand-ausmustern, svg]
+----
+@startuml UC-08c Gegenstand ausmustern
+skinparam defaultFontName monospaced
+skinparam swimlaneWidth 260
+
+|Wart (Rolf)|
+start
+:Inventarnummer eingeben;
+:PUT /gegenstaende/{inventarnummer}\nmit zustand: "ausgemustert" senden;
+
+|System|
+:Gegenstand laden;
+if (Gegenstand\ngefunden?) then (nein)
+  :HTTP 404\nGEGENSTAND_NICHT_GEFUNDEN;
+  stop
+endif
+
+if (Gegenstand hat\naktive Ausleihen?\n(ausgeliehen oder\nin_pruefung)) then (ja)
+  :HTTP 422\nGEGENSTAND_HAT_AKTIVE_AUSLEIHEN;
+  stop
+endif
+
+:Zustand auf\n"ausgemustert" setzen;
+:HTTP 200\nAktualisiertes\nGegenstandsobjekt zurückgeben;
+
+|Wart (Rolf)|
+:Ausmusterung\nbestätigt;
+stop
+
+@enduml
+----
+
+---
+
+=== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# language: de
+Funktionalität: UC-08 Katalog pflegen
+
+  # ── Kategorien ───────────────────────────────────────────────────────────────
+
+  Szenario: Kategorie erfolgreich anlegen
+    Gegeben sei keine Kategorie mit dem Namen "Lastenrad" existiert im System
+    Wenn der Wart POST /kategorien sendet mit:
+      | name                       | Lastenrad |
+      | leihdauerTage              | 3         |
+      | wartungsintervallAusleihen | 30        |
+      | einweisungspflichtig       | false     |
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält ein Feld "kategorieId"
+      Und die Antwort enthält "name" "Lastenrad"
+      Und die Antwort enthält "leihdauerTage" 3
+      Und die Antwort enthält "wartungsintervallAusleihen" 30
+      Und die Antwort enthält "einweisungspflichtig" false
+
+  Szenario: Kategorie mit doppeltem Namen wird abgelehnt
+    Gegeben sei eine Kategorie mit dem Namen "Bohrhammer" existiert bereits im System
+    Wenn der Wart POST /kategorien sendet mit name "Bohrhammer" und gültigen Feldern
+    Dann antwortet das System mit HTTP 409
+      Und der Fehlercode lautet "KATEGORIE_NAME_DOPPELT"
+
+  Szenario: Kategorie mit ungültiger Leihdauer wird abgelehnt
+    Wenn der Wart POST /kategorien sendet mit leihdauerTage 0 und sonst gültigen Feldern
+    Dann antwortet das System mit HTTP 400
+      Und der Fehlercode lautet "EINGABE_UNGUELTIG"
+
+  Szenario: Kategorieliste abrufen liefert alle Einträge
+    Gegeben sei das System enthält die Kategorien "Bohrhammer" und "Kettensäge"
+    Wenn der Wart GET /kategorien aufruft
+    Dann antwortet das System mit HTTP 200
+      Und die Antwort enthält mindestens 2 Einträge
+      Und jeder Eintrag hat die Felder "kategorieId", "name", "leihdauerTage", "wartungsintervallAusleihen", "einweisungspflichtig"
+
+  Szenario: Einzelne Kategorie abrufen
+    Gegeben sei eine Kategorie mit ID "KAT-00001" und Name "Bohrhammer" existiert
+    Wenn der Wart GET /kategorien/KAT-00001 aufruft
+    Dann antwortet das System mit HTTP 200
+      Und die Antwort enthält "name" "Bohrhammer"
+
+  Szenario: Unbekannte Kategorie-ID liefert 404
+    Wenn der Wart GET /kategorien/KAT-99999 aufruft
+    Dann antwortet das System mit HTTP 404
+      Und der Fehlercode lautet "KATEGORIE_NICHT_GEFUNDEN"
+
+  Szenario: Kategorie-Leihdauer ändern betrifft nur neue Ausleihen
+    Gegeben sei eine Kategorie "KAT-00001" mit leihdauerTage 14
+      Und eine aktive Ausleihe "AL-001" mit Rückgabefrist "2026-09-07" basierend auf der alten Leihdauer
+    Wenn der Wart PUT /kategorien/KAT-00001 sendet mit leihdauerTage 7
+    Dann antwortet das System mit HTTP 200
+      Und die Ausleihe "AL-001" hat weiterhin Rückgabefrist "2026-09-07"
+
+  # ── Gegenstände anlegen ──────────────────────────────────────────────────────
+
+  Szenario: Gegenstand erfolgreich anlegen
+    Gegeben sei eine Kategorie mit ID "KAT-00001" existiert
+      Und kein Gegenstand mit Inventarnummer "INV-00100" existiert
+    Wenn der Wart POST /gegenstaende sendet mit:
+      | inventarnummer        | INV-00100  |
+      | kategorieId           | KAT-00001  |
+      | wiederbeschaffungswert | 200       |
+    Dann antwortet das System mit HTTP 201
+      Und die Antwort enthält "inventarnummer" "INV-00100"
+      Und die Antwort enthält "kategorieId" "KAT-00001"
+      Und die Antwort enthält "wiederbeschaffungswert" 200
+      Und die Antwort enthält "kaution" 40
+      Und die Antwort enthält "zustand" "verfügbar"
+      Und die Antwort enthält "nutzungszaehler" 0
+
+  Szenario: Doppelte Inventarnummer wird abgelehnt (BR-01)
+    Gegeben sei ein Gegenstand mit Inventarnummer "INV-00042" existiert bereits
+    Wenn der Wart POST /gegenstaende sendet mit inventarnummer "INV-00042" und gültigen Feldern
+    Dann antwortet das System mit HTTP 409
+      Und der Fehlercode lautet "INVENTARNUMMER_DOPPELT"
+
+  Szenario: Ungültige Kategorie-ID beim Anlegen eines Gegenstands
+    Wenn der Wart POST /gegenstaende sendet mit kategorieId "KAT-99999" und sonst gültigen Feldern
+    Dann antwortet das System mit HTTP 404
+      Und der Fehlercode lautet "KATEGORIE_NICHT_GEFUNDEN"
+
+  # ── Kautionsberechnung BR-04 ─────────────────────────────────────────────────
+
+  Szenario: Kautionsberechnung — Normalfall (BR-04)
+    Gegeben sei eine Kategorie mit ID "KAT-00001" existiert
+    Wenn der Wart GET /gegenstaende/INV-00042 aufruft und der Wiederbeschaffungswert 200 Euro beträgt
+    Dann enthält die Antwort "kaution" 40
+
+  Szenario: Kautionsberechnung — kaufmännisches Runden (BR-04)
+    # 20% von 27 = 5.4 → gerundet 5; minimum 5 → Kaution = 5
+    Gegeben sei ein Gegenstand "INV-00200" mit Wiederbeschaffungswert 27 Euro
+    Wenn der Wart GET /gegenstaende/INV-00200 aufruft
+    Dann enthält die Antwort "kaution" 5
+
+  Szenario: Kautionsminimum 5 Euro wird angewendet (BR-04)
+    # 20% von 20 = 4 → Minimum greift → Kaution = 5
+    Gegeben sei ein Gegenstand "INV-00201" mit Wiederbeschaffungswert 20 Euro
+    Wenn der Wart GET /gegenstaende/INV-00201 aufruft
+    Dann enthält die Antwort "kaution" 5
+
+  Szenario: Kautionsmaximum 100 Euro wird angewendet (BR-04)
+    # 20% von 600 = 120 → Maximum greift → Kaution = 100
+    Gegeben sei ein Gegenstand "INV-00202" mit Wiederbeschaffungswert 600 Euro
+    Wenn der Wart GET /gegenstaende/INV-00202 aufruft
+    Dann enthält die Antwort "kaution" 100
+
+  Szenario: Kautionsberechnung exakt an der Maximumgrenze (BR-04)
+    # 20% von 500 = 100 → exakt an Grenze → Kaution = 100
+    Gegeben sei ein Gegenstand "INV-00203" mit Wiederbeschaffungswert 500 Euro
+    Wenn der Wart GET /gegenstaende/INV-00203 aufruft
+    Dann enthält die Antwort "kaution" 100
+
+  Szenario: Kautionsberechnung knapp unter Maximum (BR-04)
+    # 20% von 499 = 99.8 → gerundet 100 → Maximum greift → Kaution = 100
+    Gegeben sei ein Gegenstand "INV-00204" mit Wiederbeschaffungswert 499 Euro
+    Wenn der Wart GET /gegenstaende/INV-00204 aufruft
+    Dann enthält die Antwort "kaution" 100
+
+  Szenario: Kautionsberechnung typischer Mittelwert (BR-04)
+    # 20% von 150 = 30 → Kaution = 30
+    Gegeben sei ein Gegenstand "INV-00205" mit Wiederbeschaffungswert 150 Euro
+    Wenn der Wart GET /gegenstaende/INV-00205 aufruft
+    Dann enthält die Antwort "kaution" 30
+
+  # ── Gegenstand ausmustern ───────────────────────────────────────────────────
+
+  Szenario: Gegenstand ausmustern — kein aktive Ausleihe vorhanden
+    Gegeben sei ein Gegenstand "INV-00042" im Zustand "verfügbar"
+    Wenn der Wart PUT /gegenstaende/INV-00042 sendet mit zustand "ausgemustert"
+    Dann antwortet das System mit HTTP 200
+      Und die Antwort enthält "zustand" "ausgemustert"
+
+  Szenario: Gegenstand ausmustern — aktive Ausleihe vorhanden
+    Gegeben sei ein Gegenstand "INV-00042" im Zustand "ausgeliehen"
+    Wenn der Wart PUT /gegenstaende/INV-00042 sendet mit zustand "ausgemustert"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "GEGENSTAND_HAT_AKTIVE_AUSLEIHEN"
+
+  Szenario: Gegenstand ausmustern — Gegenstand in Prüfung
+    Gegeben sei ein Gegenstand "INV-00042" im Zustand "in_pruefung"
+    Wenn der Wart PUT /gegenstaende/INV-00042 sendet mit zustand "ausgemustert"
+    Dann antwortet das System mit HTTP 422
+      Und der Fehlercode lautet "GEGENSTAND_HAT_AKTIVE_AUSLEIHEN"
+
+  # ── Rollenprüfung ──────────────────────────────────────────────────────────
+
+  Szenario: Anlage durch falsche Rolle wird abgelehnt
+    Wenn der Thekendienst POST /gegenstaende sendet mit X-Role "thekendienst"
+    Dann antwortet das System mit HTTP 403
+      Und der Fehlercode lautet "ROLLE_UNZULAESSIG"
+----
+
+---
+
+=== EARS-Anforderungen
+
+Diese Anforderungen leiten sich direkt aus den Geschäftsregeln und dem Systemkontext ab.
+Die Syntax folgt dem EARS-Standard (Easy Approach to Requirements Syntax).
+
+==== Kategorien
+
+*EARS-K01 (BR-02)*
+When [Leihgut] eine Anfrage zur Anlage einer Kategorie erhält,
+shall [Leihgut] die Kategorie mit Name, Leihdauer in Tagen, Wartungsintervall in Ausleihen und Einweisungspflicht (ja/nein) persistieren.
+
+*EARS-K02 (BR-02)*
+When [Leihgut] eine Anfrage zur Anlage oder Änderung einer Kategorie enthält einen Namen, der bereits einer anderen Kategorie zugeordnet ist,
+shall [Leihgut] die Anfrage mit Fehlercode `KATEGORIE_NAME_DOPPELT` ablehnen.
+
+*EARS-K03 (BR-02)*
+When [Leihgut] eine Anfrage zur Anlage einer Kategorie enthält einen Leihdauerwert ≤ 0 oder ein Wartungsintervall ≤ 0,
+shall [Leihgut] die Anfrage mit Fehlercode `EINGABE_UNGUELTIG` ablehnen.
+
+*EARS-K04*
+When [Leihgut] eine Änderung der Leihdauer einer Kategorie speichert,
+shall [Leihgut] die Rückgabefristen bereits laufender Ausleihen dieser Kategorie unverändert lassen.
+
+*EARS-K05*
+When [Leihgut] eine Anfrage für eine nicht existierende Kategorie-ID erhält,
+shall [Leihgut] mit HTTP 404 und Fehlercode `KATEGORIE_NICHT_GEFUNDEN` antworten.
+
+==== Gegenstände
+
+*EARS-G01 (BR-01)*
+When [Leihgut] eine Anfrage zur Anlage eines Gegenstands erhält,
+shall [Leihgut] prüfen, ob die Inventarnummer bereits vergeben ist, und bei Konflikt mit Fehlercode `INVENTARNUMMER_DOPPELT` ablehnen.
+
+*EARS-G02 (BR-01)*
+When [Leihgut] einen Gegenstand anlegt,
+shall [Leihgut] genau eine Kategorie-ID zuordnen; fehlt diese oder ist sie unbekannt, wird die Anfrage mit `KATEGORIE_NICHT_GEFUNDEN` abgelehnt.
+
+*EARS-G03 (BR-03)*
+When [Leihgut] eine Anfrage zur Anlage oder Änderung eines Gegenstands enthält einen Wiederbeschaffungswert ≤ 0,
+shall [Leihgut] die Anfrage mit Fehlercode `EINGABE_UNGUELTIG` ablehnen.
+
+*EARS-G04*
+When [Leihgut] einen Gegenstand anlegt,
+shall [Leihgut] den Anfangszustand auf `verfügbar` und den Nutzungszähler auf `0` setzen.
+
+*EARS-G05*
+When [Leihgut] eine Anfrage zur Ausmusterung eines Gegenstands erhält und der Gegenstand sich im Zustand `ausgeliehen` oder `in_pruefung` befindet,
+shall [Leihgut] die Ausmusterung mit Fehlercode `GEGENSTAND_HAT_AKTIVE_AUSLEIHEN` verweigern.
+
+==== Kautionsberechnung
+
+*EARS-K04 (BR-04)*
+When [Leihgut] einen Gegenstand über GET /gegenstaende/{inventarnummer} oder GET /gegenstaende ausliefert,
+shall [Leihgut] das berechnete Feld `kaution` mitliefern: 20 Prozent des Wiederbeschaffungswerts, kaufmännisch auf ganze Euro gerundet, mindestens 5 Euro, höchstens 100 Euro.
+
+*EARS-K05 (BR-04)*
+When [Leihgut] die Kaution berechnet und das Ergebnis kleiner als 5 Euro ist,
+shall [Leihgut] den Wert auf 5 Euro anheben.
+
+*EARS-K06 (BR-04)*
+When [Leihgut] die Kaution berechnet und das Ergebnis größer als 100 Euro ist,
+shall [Leihgut] den Wert auf 100 Euro deckeln.
+
+==== Zugriffskontrolle
+
+*EARS-Z01*
+When [Leihgut] eine schreibende Anfrage (POST, PUT) auf `/kategorien` oder `/gegenstaende` erhält und der Header `X-Role` nicht den Wert `wart` hat,
+shall [Leihgut] die Anfrage mit HTTP 403 und Fehlercode `ROLLE_UNZULAESSIG` ablehnen.
+
+*EARS-Z02*
+When [Leihgut] eine lesende Anfrage (GET) auf `/kategorien` oder `/gegenstaende` erhält und der Header `X-Role` weder `wart` noch `thekendienst` enthält,
+shall [Leihgut] die Anfrage mit HTTP 403 und Fehlercode `ROLLE_UNZULAESSIG` ablehnen.

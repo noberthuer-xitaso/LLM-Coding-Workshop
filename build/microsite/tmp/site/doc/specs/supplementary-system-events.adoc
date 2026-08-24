@@ -1,0 +1,624 @@
+:jbake-status: published
+:jbake-order: -1
+:jbake-type: page_toc
+:jbake-menu: specs
+:jbake-title: Supplementary Specification: Systemereignisse — Leihgut
+
+ifndef::dtc-magic-toc[]
+:dtc-magic-toc:
+:toc: left
+:toclevels: 3
+
+
+:toc: left
+
+++++
+<!-- endtoc -->
+++++
+endif::[]
+== Supplementary Specification: Systemereignisse — Leihgut
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+=== Einleitung
+
+Dieses Dokument beschreibt Systemverhalten, das nicht durch einen menschlichen Akteur
+ausgelöst wird.
+Im Gegensatz zu Use Cases, die auf eine bewusste Benutzeraktion folgen, entstehen diese
+Ereignisse durch Zeitablauf oder durch Auswertung persistenter Zustände zum Zeitpunkt
+eines Zugriffs.
+
+Das System Leihgut kennt zwei solcher Mechanismen:
+
+SE-01 Reservierungsverfall:: Eine Reservierung, die drei Kalendertage ungenutzt bleibt,
+verfällt automatisch.
+Das System erkennt diesen Zustand und verarbeitet die Folgen beim nächsten
+Zugriff auf den betroffenen Gegenstand oder die betroffene Reservierung
+(Lazy Evaluation).
+
+SE-02 Sperre-Berechnung:: Der Sperrstatus eines Mitglieds ist kein gespeichertes Feld,
+sondern eine jederzeit aus den aktiven Ausleihen ableitbare Eigenschaft
+(Computed Property).
+Das System berechnet ihn bei jedem relevanten Zugriff neu.
+
+Beide Mechanismen sind bewusst ohne Hintergrundprozesse oder Scheduler realisiert.
+Das entspricht der Rahmenbedingung: _„Ein Prozess, lokal startbar, ohne externe Dienste."_
+
+=== SE-01: Reservierungsverfall
+
+==== Beschreibung
+
+Eine Reservierung wird angelegt, wenn ein Gegenstand nach der Prüfung für das erste
+Mitglied einer Warteschlange zugeteilt wird (BR-30).
+Sie ist drei Kalendertage gültig.
+Holt das Mitglied den Gegenstand in dieser Zeit nicht ab, verfällt die Reservierung
+(BR-31).
+
+Das System prüft nicht aktiv per Scheduler, ob Reservierungen verfallen sind.
+Stattdessen erfolgt die Prüfung unmittelbar vor jeder Operation, die den Zustand
+eines Gegenstands oder einer Reservierung berührt.
+
+==== Design-Entscheidung: Lazy Evaluation
+
+[cols="1,3"]
+|===
+|Entscheidung |Lazy Evaluation — kein Hintergrundprozess, kein Scheduler
+
+|Begründung
+|Die Rahmenbedingung schreibt vor: „Ein Prozess, lokal startbar, ohne externe Dienste."
+Ein Scheduler ist ein externer Dienst oder erfordert zumindest einen dauerhaft
+laufenden Prozess.
+Die Öffnungszeiten des Vereins (dienstags und samstags) machen eine zeitgenaue
+Prüfung ohnehin irrelevant: Zwischen zwei Öffnungstagen findet keine Ausgabe statt.
+Lazy Evaluation ist korrekt und ausreichend.
+
+|Konsequenz
+|Ein Verfall wird erst sichtbar, wenn das System das nächste Mal abgefragt wird.
+Zwischen zwei Öffnungstagen „passiert" formal nichts — der Zustand wird erst beim
+nächsten Zugriff angepasst.
+Das ist für dieses System akzeptabel.
+
+|Atomarität
+|Der Verfall-Check und die auslösende Operation laufen in derselben Transaktion.
+Es gibt keinen Zustand, in dem Reservierungen verfallen sind, aber die Folgewirkungen
+(neue Reservierung, Gegenstand verfügbar) noch nicht eingetreten sind.
+|===
+
+==== Ablaufbeschreibung
+
+Vor jeder Operation, die den Zustand eines Gegenstands oder einer Reservierung berührt,
+führt das System den folgenden Ablauf aus:
+
+. Suche alle Reservierungen mit `verfall_datum < heute`.
+. Falls keine gefunden: weiter mit der ursprünglichen Operation.
+. Verarbeite jede verfallene Reservierung in Entstehungsreihenfolge (FIFO):
+.. Setze Reservierungsstatus auf `verfallen`.
+.. Prüfe die Warteschlange der Kategorie auf die nächste aktive Vormerkung.
+.. Falls kein weiterer Eintrag in der Warteschlange vorhanden ist:
+*** Setze Gegenstandszustand auf `verfügbar`.
+.. Falls ein weiterer Eintrag vorhanden ist:
+*** Prüfe, ob das Mitglied gesperrt ist (→ SE-02).
+*** Falls gesperrt (BR-33): Überspringe dieses Mitglied. Es behält seinen Platz in der
+Warteschlange. Prüfe den nächsten Eintrag.
+*** Falls nicht gesperrt: Lege neue Reservierung an (BR-30).
+Setze `verfall_datum = heute + 3 Kalendertage`.
+Stoppe die Verarbeitung der Warteschlange für diesen Gegenstand.
+. Führe die ursprüngliche Operation aus.
+
+[plantuml, se01-ablauf, svg]
+....
+@startuml
+skinparam defaultFontName sans-serif
+skinparam ActivityBackgroundColor #f5f5f5
+skinparam ActivityBorderColor #888888
+skinparam ArrowColor #444444
+
+start
+:Systemoperation wird aufgerufen\n(GET, POST, DELETE auf Gegenstand\noder Reservierung);
+
+:Suche Reservierungen mit\nverfall_datum < heute;
+
+if (Verfallene Reservierungen\ngefunden?) then (ja)
+  while (Nächste verfallene\nReservierung vorhanden?) is (ja)
+    :Setze Reservierung\nauf Status "verfallen";
+    :Prüfe Warteschlange\nder Kategorie;
+    if (Weitere Vormerkung\nin Warteschlange?) then (ja)
+      if (Nächstes Mitglied\ngesperrt? (SE-02)) then (ja, BR-33)
+        :Überspringe Mitglied;\nPlatz bleibt erhalten;
+        :Prüfe nächste\nVormerkung;
+      else (nein)
+        :Lege neue Reservierung\nfür dieses Mitglied an (BR-30);\nverfall_datum = heute + 3 Tage;
+        break
+      endif
+    else (nein)
+      :Setze Gegenstand\nauf "verfügbar";
+      break
+    endif
+  endwhile
+else (nein)
+endif
+
+:Führe ursprüngliche\nOperation aus;
+stop
+@enduml
+....
+
+==== Trigger-Punkte
+
+Der Verfall-Check wird vor jeder der folgenden Operationen ausgeführt.
+
+[cols="1,3,1"]
+|===
+|Nummer |Operation |Verfall-Check ausgeführt
+
+|1
+|`GET /gegenstaende/{inventarnummer}` — Verfügbarkeit eines Gegenstands abrufen
+|ja
+
+|2
+|`POST /ausleihen` — Gegenstand ausgeben
+|ja
+
+|3
+|`POST /vormerkungen` — Neue Vormerkung anlegen
+|ja
+
+|4
+|`DELETE /vormerkungen/{id}` — Vormerkung stornieren
+|ja
+
+|5
+|`POST /ausleihen/{id}/rueckgabe` — Rückgabe an der Theke erfassen
+|ja
+
+|6
+|`POST /ausleihen/{id}/verlaengerung` — Verlängerung beantragen
+|ja
+
+|7
+|`POST /pruefprotokolle` — Prüfprotokoll abschließen
+|ja
+
+|8
+|Jede weitere Lese- oder Schreiboperation, die den Zustand eines Gegenstands
+oder einer Reservierung berührt
+|ja
+|===
+
+==== Gherkin-Szenarien
+
+[source,gherkin]
+----
+Feature: SE-01 Reservierungsverfall
+
+  Background:
+    Given der Datums-Provider liefert "2026-08-20" als heutiges Datum
+
+  # -----------------------------------------------------------------------
+  # Szenario A: Reservierung verfällt, keine weitere Vormerkung → verfügbar
+  # -----------------------------------------------------------------------
+  Scenario: Verfallene Reservierung ohne Folge-Vormerkung macht Gegenstand verfügbar
+    Given Gegenstand "INV-001" der Kategorie "Bohrmaschine" hat den Zustand "reserviert"
+    And die Reservierung für Mitglied "M-10" auf "INV-001" hat das verfall_datum "2026-08-17"
+    And es gibt keine weitere Vormerkung für die Kategorie "Bohrmaschine"
+    When das System "GET /gegenstaende/INV-001" verarbeitet
+    Then hat die Reservierung von "M-10" den Status "verfallen"
+    And Gegenstand "INV-001" hat den Zustand "verfügbar"
+
+  # -----------------------------------------------------------------------
+  # Szenario B: Reservierung verfällt, nächstes Mitglied nicht gesperrt → neue Reservierung
+  # -----------------------------------------------------------------------
+  Scenario: Verfallene Reservierung löst Reservierung für nächstes Mitglied aus
+    Given Gegenstand "INV-002" der Kategorie "Bohrmaschine" hat den Zustand "reserviert"
+    And die Reservierung für Mitglied "M-10" auf "INV-002" hat das verfall_datum "2026-08-17"
+    And Mitglied "M-20" hat eine aktive Vormerkung für die Kategorie "Bohrmaschine"
+      mit eingang_zeit "2026-08-05T10:00:00"
+    And Mitglied "M-20" ist nicht gesperrt
+    When das System "POST /ausleihen" verarbeitet
+    Then hat die Reservierung von "M-10" den Status "verfallen"
+    And es gibt eine neue Reservierung für Mitglied "M-20" auf Gegenstand "INV-002"
+    And die neue Reservierung hat verfall_datum "2026-08-23"
+    And Gegenstand "INV-002" hat den Zustand "reserviert"
+
+  # -----------------------------------------------------------------------
+  # Szenario C: Nächstes Mitglied ist gesperrt → überspringen, kein weiterer → verfügbar
+  # -----------------------------------------------------------------------
+  Scenario: Verfallene Reservierung, nächstes Mitglied gesperrt, kein weiteres → verfügbar
+    Given Gegenstand "INV-003" der Kategorie "Kettensäge" hat den Zustand "reserviert"
+    And die Reservierung für Mitglied "M-10" auf "INV-003" hat das verfall_datum "2026-08-17"
+    And Mitglied "M-20" hat eine aktive Vormerkung für die Kategorie "Kettensäge"
+    And Mitglied "M-20" ist gesperrt
+    And es gibt keine weitere Vormerkung nach "M-20" in der Warteschlange
+    When das System "POST /vormerkungen" verarbeitet
+    Then hat die Reservierung von "M-10" den Status "verfallen"
+    And es wurde keine neue Reservierung für Mitglied "M-20" angelegt
+    And Mitglied "M-20" hat weiterhin seinen Platz in der Warteschlange für "Kettensäge"
+    And Gegenstand "INV-003" hat den Zustand "verfügbar"
+
+  # -----------------------------------------------------------------------
+  # Szenario D: Mehrere Reservierungen gleichzeitig verfallen → alle abgearbeitet
+  # -----------------------------------------------------------------------
+  Scenario: Zwei verfallene Reservierungen für verschiedene Gegenstände werden beide verarbeitet
+    Given Gegenstand "INV-010" der Kategorie "Beamer" hat den Zustand "reserviert"
+    And die Reservierung für Mitglied "M-10" auf "INV-010" hat das verfall_datum "2026-08-15"
+    And es gibt keine weitere Vormerkung für die Kategorie "Beamer"
+    And Gegenstand "INV-011" der Kategorie "Lastenrad" hat den Zustand "reserviert"
+    And die Reservierung für Mitglied "M-30" auf "INV-011" hat das verfall_datum "2026-08-16"
+    And es gibt keine weitere Vormerkung für die Kategorie "Lastenrad"
+    When das System "GET /gegenstaende/INV-010" verarbeitet
+    Then hat die Reservierung von "M-10" auf "INV-010" den Status "verfallen"
+    And Gegenstand "INV-010" hat den Zustand "verfügbar"
+    And hat die Reservierung von "M-30" auf "INV-011" den Status "verfallen"
+    And Gegenstand "INV-011" hat den Zustand "verfügbar"
+----
+
+NOTE: Szenario D setzt voraus, dass der Verfall-Check alle Gegenstände der Datenbank
+prüft, nicht nur den in der URL adressierten.
+Das ist für Korrektheit notwendig, da ein Gegenstand in der Warteschlange eines anderen
+gesperrten Mitglieds sein könnte.
+
+==== EARS-Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderung
+
+|SE-01-REQ-01
+|Event-driven
+|Wenn das System eine Operation empfängt, die den Zustand eines Gegenstands oder einer
+Reservierung berührt, *soll* das System vor Ausführung der Operation alle Reservierungen
+mit `verfall_datum < heute` als `verfallen` markieren und die Folgewirkungen (neue
+Reservierung oder Gegenstand verfügbar) in derselben Transaktion anwenden.
+
+|SE-01-REQ-02
+|State-driven
+|Solange die Warteschlange einer Kategorie mindestens eine nicht gesperrte Vormerkung
+enthält, *soll* das System bei Verfall einer Reservierung eine neue Reservierung für das
+erste nicht gesperrte Mitglied der Warteschlange anlegen und das Verfallsdatum auf
+`heute + 3 Kalendertage` setzen.
+
+|SE-01-REQ-03
+|Unwanted behaviour
+|Wenn beim Verfall-Check das nächste Mitglied in der Warteschlange gesperrt ist,
+*soll* das System für dieses Mitglied keine Reservierung anlegen, seinen Platz in der
+Warteschlange beibehalten und das nächste Mitglied in der Warteschlange prüfen (BR-33).
+
+|SE-01-REQ-04
+|Ubiquitous
+|Das System *soll* den Verfall-Check und alle daraus resultierenden Zustandsübergänge
+atomar ausführen, sodass kein Zwischenzustand dauerhaft persistiert wird.
+
+|SE-01-REQ-05
+|Event-driven
+|Wenn nach dem Verfall einer Reservierung keine weitere aktive Vormerkung für die
+betreffende Kategorie existiert, *soll* das System den Gegenstandszustand auf
+`verfügbar` setzen.
+|===
+
+=== SE-02: Sperre-Berechnung
+
+==== Beschreibung
+
+Ein Mitglied ist gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist
+(BR-34).
+Überfällig bedeutet: Die Ausleihe hat den Status `aktiv` und die `rueckgabefrist` liegt
+vor dem heutigen Datum (BR-35).
+Die Sperre endet automatisch, sobald für alle überfälligen Ausleihen das Prüfprotokoll
+abgeschlossen wurde (BR-36).
+
+Es gibt keinen eigenständigen „Entsperr"-Endpunkt.
+Der Sperrstatus wird nicht gespeichert, sondern bei jedem relevanten Zugriff neu
+berechnet.
+
+==== Design-Entscheidung: Computed Property
+
+[cols="1,3"]
+|===
+|Entscheidung |Computed Property — kein gespeichertes Feld, keine asynchrone Berechnung
+
+|Begründung
+|„Gesperrt" ist zu jedem Zeitpunkt vollständig aus den Ausleihdaten ableitbar.
+Ein gespeichertes Flag könnte nach einer Datenmigration, einem manuellen Datenbankeingriff
+oder einem Fehler in der Synchronisierungslogik inkonsistent werden.
+Die berechnete Variante ist immer korrekt und erfordert keinen Hintergrundprozess.
+
+|Konsequenz
+|Jede Operation, die den Sperrstatus eines Mitglieds benötigt, führt eine Datenbankabfrage
+durch.
+Bei der erwarteten Datenmenge (≤ 800 Mitglieder, ≤ 400 Gegenstände) ist das performant
+genug; das Qualitätsziel von 300 ms gilt für die Gesamtantwort.
+
+|Testbarkeit
+|Das Datum wird über einen austauschbaren Datums-Provider bereitgestellt
+(vgl. PRD, Abschnitt Rahmenbedingungen: „Das System liest das aktuelle Datum über eine
+austauschbare Quelle, damit Fristen testbar bleiben.").
+Tests können den Provider mit einem beliebigen Datum instrumentieren, ohne Systemzeit
+zu manipulieren.
+|===
+
+==== Formel
+
+----
+gesperrt(mitglied_id) =
+  EXISTS (
+    SELECT 1
+    FROM   Ausleihe
+    WHERE  mitglied_id  = :mitglied_id
+    AND    status       = 'aktiv'
+    AND    rueckgabefrist < today()
+  )
+----
+
+`today()` ist der über den austauschbaren Datums-Provider gelieferte Wert.
+Die Formel wird nicht gecacht und nicht asynchron aktualisiert.
+
+==== Trigger-Punkte
+
+[cols="1,3,1"]
+|===
+|Nummer |Operation |Formel wird ausgewertet
+
+|1
+|`POST /ausleihen` — Ausgabe: Gesperrtes Mitglied darf nicht ausleihen (BR-07)
+|ja
+
+|2
+|`POST /ausleihen/{id}/verlaengerung` — Verlängerung: Überfällige Ausleihe ist gesperrt,
+Verlängerung ausgeschlossen (BR-11)
+|ja
+
+|3
+|`POST /vormerkungen` — Neue Vormerkung: Hinweis anzeigen, aber nicht blockieren (BR-33)
+|ja
+
+|4
+|Verfall-Check (SE-01) — Gesperrtes Mitglied beim Durchlauf der Warteschlange
+überspringen (BR-33)
+|ja
+
+|5
+|`GET /mitglieder/{id}` — Response-Feld `gesperrt` befüllen
+|ja
+|===
+
+==== Ablaufbeschreibung
+
+[plantuml, se02-ablauf, svg]
+....
+@startuml
+skinparam defaultFontName sans-serif
+skinparam ActivityBackgroundColor #f5f5f5
+skinparam ActivityBorderColor #888888
+skinparam ArrowColor #444444
+
+start
+:Relevante Operation aufgerufen;
+:Ermittle mitglied_id aus Anfrage\noder Kontext;
+
+:Führe Datenbankabfrage aus:\nEXISTS(SELECT 1 FROM Ausleihe\nWHERE mitglied_id = :id\nAND status = 'aktiv'\nAND rueckgabefrist < today());
+
+if (Abfrage liefert TRUE?) then (ja)
+  :gesperrt = true;
+else (nein)
+  :gesperrt = false;
+endif
+
+if (Operation erfordert\nnicht-gesperrtes Mitglied?) then (ja)
+  if (gesperrt = true?) then (ja)
+    :Anfrage mit Fehler ablehnen\n(HTTP 422 / Fehlercode MEMBER_LOCKED);
+    stop
+  else (nein)
+    :Operation fortsetzen;
+  endif
+else (nein — nur Hinweis oder\nLesen der Eigenschaft)
+  :gesperrt-Wert in Antwort\noder Kontext verwenden;
+endif
+
+stop
+@enduml
+....
+
+==== Gherkin-Szenarien
+
+[source,gherkin]
+----
+Feature: SE-02 Sperre-Berechnung
+
+  Background:
+    Given der Datums-Provider liefert "2026-08-20" als heutiges Datum
+
+  # -----------------------------------------------------------------------
+  # Szenario A: Sperre setzt, wenn Rückgabefrist überschritten
+  # -----------------------------------------------------------------------
+  Scenario: Mitglied mit überfälliger Ausleihe ist gesperrt
+    Given Mitglied "M-42" hat eine Ausleihe auf Gegenstand "INV-100"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-18"
+    When das System "POST /ausleihen" mit mitglied_id "M-42" verarbeitet
+    Then wird die Sperre-Formel für Mitglied "M-42" ausgewertet
+    And die Formel liefert gesperrt = true
+    And die Anfrage wird mit Fehlercode "MEMBER_LOCKED" abgelehnt
+
+  Scenario: Mitglied ohne überfällige Ausleihe ist nicht gesperrt
+    Given Mitglied "M-43" hat eine Ausleihe auf Gegenstand "INV-101"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-25"
+    When das System "POST /ausleihen" mit mitglied_id "M-43" verarbeitet
+    Then wird die Sperre-Formel für Mitglied "M-43" ausgewertet
+    And die Formel liefert gesperrt = false
+    And die Anfrage wird nicht wegen Sperre abgelehnt
+
+  # -----------------------------------------------------------------------
+  # Szenario B: Sperre hebt sich, wenn letztes Prüfprotokoll abgeschlossen (BR-36)
+  # -----------------------------------------------------------------------
+  Scenario: Sperre endet nach Abschluss des letzten Prüfprotokolls
+    Given Mitglied "M-42" hatte eine Ausleihe auf Gegenstand "INV-100"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-18"
+    And Gegenstand "INV-100" wurde an die Theke zurückgegeben
+    And ein Prüfprotokoll für Ausleihe auf "INV-100" wird abgeschlossen
+      mit nachzustand "verfügbar"
+    And es gibt keine weitere aktive Ausleihe von "M-42" mit rueckgabefrist < heute
+    When das System "GET /mitglieder/M-42" verarbeitet
+    Then wird die Sperre-Formel für Mitglied "M-42" ausgewertet
+    And die Formel liefert gesperrt = false
+    And die Antwort enthält "gesperrt": false
+
+  # -----------------------------------------------------------------------
+  # Szenario C: Datum über austauschbaren Provider — Testbarkeit
+  # -----------------------------------------------------------------------
+  Scenario: Sperrstatus ändert sich mit dem vom Provider gelieferten Datum
+    Given Mitglied "M-50" hat eine Ausleihe auf Gegenstand "INV-200"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-20"
+    And der Datums-Provider liefert "2026-08-19" als heutiges Datum
+    When das System "GET /mitglieder/M-50" verarbeitet
+    Then liefert die Sperre-Formel gesperrt = false
+
+    Given der Datums-Provider liefert "2026-08-21" als heutiges Datum
+    When das System "GET /mitglieder/M-50" verarbeitet
+    Then liefert die Sperre-Formel gesperrt = true
+
+  # -----------------------------------------------------------------------
+  # Szenario D: Sperre verhindert Verlängerung (BR-11)
+  # -----------------------------------------------------------------------
+  Scenario: Gesperrtes Mitglied kann keine Verlängerung beantragen
+    Given Mitglied "M-42" hat eine Ausleihe "A-99" auf Gegenstand "INV-300"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-25"
+    And Mitglied "M-42" hat eine weitere Ausleihe auf Gegenstand "INV-301"
+      mit status "aktiv"
+      und rueckgabefrist "2026-08-18"
+    When das System "POST /ausleihen/A-99/verlaengerung" für Mitglied "M-42" verarbeitet
+    Then wird die Sperre-Formel für Mitglied "M-42" ausgewertet
+    And die Formel liefert gesperrt = true
+    And die Verlängerung wird mit Fehlercode "MEMBER_LOCKED" abgelehnt
+----
+
+==== EARS-Anforderungen
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderung
+
+|SE-02-REQ-01
+|State-driven
+|Solange ein Mitglied mindestens eine aktive Ausleihe mit `rueckgabefrist < heute` hat,
+*soll* das System das Mitglied bei jeder Sperre-Auswertung als gesperrt behandeln.
+
+|SE-02-REQ-02
+|Event-driven
+|Wenn das Prüfprotokoll der letzten überfälligen Ausleihe eines Mitglieds abgeschlossen
+wird, *soll* das System das Mitglied beim nächsten Zugriff als nicht gesperrt ausweisen,
+ohne dass ein separater „Entsperr"-Aufruf erforderlich ist.
+
+|SE-02-REQ-03
+|Ubiquitous
+|Das System *soll* den Sperrstatus eines Mitglieds niemals als persistentes Feld
+speichern, sondern ausschließlich durch Auswertung der Formel
+`EXISTS(SELECT 1 FROM Ausleihe WHERE mitglied_id = :id AND status = 'aktiv' AND
+rueckgabefrist < today())` bestimmen.
+
+|SE-02-REQ-04
+|Ubiquitous
+|Das System *soll* den Wert von `today()` ausschließlich über einen austauschbaren
+Datums-Provider beziehen, sodass der Sperrstatus in Tests ohne Manipulation der
+Systemzeit geprüft werden kann.
+
+|SE-02-REQ-05
+|Event-driven
+|Wenn eine Operation das Mitglied vormerkt (`POST /vormerkungen`) und die Sperre-Formel
+`true` liefert, *soll* das System die Vormerkung trotzdem anlegen und lediglich einen
+Hinweis zurückgeben, dass das Mitglied derzeit gesperrt ist (BR-33).
+|===
+
+=== Querverweise
+
+==== Betroffene Geschäftsregeln
+
+[cols="1,3,2"]
+|===
+|BR-ID |Inhalt |Systemereignis
+
+|BR-30
+|Reservierung wird angelegt, wenn Gegenstand nach Prüfung verfügbar und Vormerkung
+vorhanden
+|SE-01 (Folgewirkung Verfall-Check)
+
+|BR-31
+|Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung
+|SE-01 (Kernregel)
+
+|BR-33
+|Gesperrtes Mitglied wird beim Verfall übersprungen, behält Platz in der Warteschlange
+|SE-01 (Bedingung im Ablauf), SE-02 (Lieferant des Sperrstatus)
+
+|BR-34
+|Mitglied ist gesperrt, sobald mindestens eine Ausleihe überfällig ist
+|SE-02 (Kernregel)
+
+|BR-35
+|Überfällig: Rückgabefrist vor heutigem Datum, Gegenstand nicht zurückgegeben
+|SE-02 (Formelinhalt)
+
+|BR-36
+|Sperre endet, wenn alle überfälligen Ausleihen des Mitglieds geprüft sind
+|SE-02 (Beendigungsbedingung)
+|===
+
+==== Betroffene Use Cases
+
+[cols="1,3,1,1"]
+|===
+|Use-Case-Bereich |Beschreibung |SE-01 |SE-02
+
+|Ausgabe (`POST /ausleihen`)
+|Verfall-Check vor Ausgabe; Sperre verhindert Ausgabe (BR-07)
+|Trigger
+|Trigger
+
+|Verlängerung (`POST /ausleihen/{id}/verlaengerung`)
+|Sperre verhindert Verlängerung bei überfälliger Ausleihe (BR-11)
+|Trigger
+|Trigger
+
+|Vormerkung anlegen (`POST /vormerkungen`)
+|Verfall-Check; Sperre erzeugt Hinweis, blockiert nicht (BR-33)
+|Trigger
+|Trigger
+
+|Vormerkung stornieren (`DELETE /vormerkungen/{id}`)
+|Verfall-Check zum Bereinigen von Altbeständen
+|Trigger
+|—
+
+|Verfügbarkeit abfragen (`GET /gegenstaende/{inventarnummer}`)
+|Verfall-Check liefert aktuellen Zustand
+|Trigger
+|—
+
+|Mitglied abrufen (`GET /mitglieder/{id}`)
+|Response-Feld `gesperrt` berechnet
+|—
+|Trigger
+
+|Prüfprotokoll abschließen (`POST /pruefprotokolle`)
+|Kann Sperre aufheben (BR-36); Verfall-Check
+|Trigger
+|Trigger (implizit, nächster Zugriff)
+|===
+
+==== Verwandte Designentscheidungen
+
+Beide Systemereignisse hängen unmittelbar mit der Rahmenbedingung zusammen, die
+Hintergrundprozesse ausschließt.
+Sollte diese Einschränkung in einer späteren Release fallen, sind beide Mechanismen
+durch Scheduler ersetzbar, ohne dass sich die Geschäftsregeln ändern.
+
+Die Austauschbarkeit des Datums-Providers (SE-02-REQ-04) und die Atomarität des
+Verfall-Checks (SE-01-REQ-04) sind architektonisch relevant und sollten in einem
+zugehörigen ADR dokumentiert werden.
