@@ -1,0 +1,582 @@
+:jbake-title: Architecture Decisions
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 9
+:filename: /chapters/09_architecture_decisions.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-design-decisions]]
+== 9. Architekturentscheidungen
+
+Die folgenden Architekturentscheidungen dokumentieren die prägenden Weichenstellungen für das System _Leihgut_.
+Jede Entscheidung folgt dem Nygard-ADR-Format und enthält eine Pugh-Matrix, die die bewerteten Optionen gegenüberstellt.
+
+---
+
+=== ADR-001: REST-API ohne Web-Frontend
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Thekendienst und Mitglied benötigen eine Schnittstelle zum System.
+Die Wahl der Schnittstellenform beeinflusst Testbarkeit, Implementierungsaufwand und die Möglichkeit, Fehler automatisiert zu erkennen.
+Ein Web-Frontend würde eine zusätzliche Schicht (HTML, CSS, JavaScript, Browser-Rendering) einführen, deren Korrektheit sich nicht vollständig durch Compiler oder Testsuite prüfen lässt.
+Eine Desktop-Applikation brächte denselben Nachteil und zusätzliche Installationsabhängigkeiten.
+
+==== Entscheidung
+
+Option 1: REST-API only.
+Es wird ausschließlich eine REST-API bereitgestellt.
+Kein Web-Frontend, keine Desktop-Applikation.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: REST-API only
+|Option 2: Web-UI mit Backend
+|Option 3: Desktop-App
+
+|Testbarkeit (Compiler + Testsuite greifen vollständig)
+|{plus}
+|{minus}
+|{minus}
+
+|Implementierungsaufwand
+|{plus}
+|{minus}
+|0
+
+|Fehlerkorrektur durch Compiler / automatisierte Tests
+|{plus}
+|{minus}
+|{minus}
+
+|*Gesamt*
+|*+3*
+|*−3*
+|*−2*
+|===
+
+_{plus} = Vorteil, 0 = neutral, − = Nachteil_
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Compiler und Testsuite greifen als vollständige Fehlerkorrektur.
+* Kein zusätzliches Frontend-Framework im Scope.
+* Schnittstelle ist maschinenlesbar und einfach zu automatisieren.
+
+*Negativ:*
+
+* Kein direkt nutzbares UI für ehrenamtliche Thekendienste ohne technischen Hintergrund; erfordert eine spätere UI-Schicht oder CLI-Wrapper.
+* Visuelle Workflows müssen durch externe Clients abgebildet werden.
+
+==== Querverweise
+
+* PRD, Abschnitt „Rahmenbedingungen": _„Ohne UI greifen Compiler und Testsuite als Fehlerkorrektur voll."_
+* PRD, Abschnitt „Umfang von Release 1": Web-Oberfläche ist explizit Out of Scope.
+
+---
+
+=== ADR-002: Lazy Evaluation für Reservierungsverfall (kein Scheduler)
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Reservierungen verfallen nach drei Kalendertagen (BR-31).
+Das System muss diesen Zustandswechsel erkennen und Folgewirkungen auslösen — entweder die nächste Vormerkung bedienen (BR-30) oder den Gegenstand auf _verfügbar_ setzen.
+Drei Umsetzungsansätze stehen zur Wahl:
+
+. Hintergrundprozess / Cron-Job, der regelmäßig verfallene Reservierungen bereinigt.
+. Lazy Evaluation: Der Verfall wird beim nächsten Zugriff auf den betreffenden Gegenstand oder die Reservierung geprüft und verarbeitet.
+. Verfall-Timestamp in der Datenbank, aber kein automatischer Zustandsübergang — der Client muss den Verfall selbst erkennen.
+
+==== Entscheidung
+
+Option 2: Lazy Evaluation.
+Der Verfall-Check wird unmittelbar vor jeder Operation ausgeführt, die den Zustand eines Gegenstands oder einer Reservierung berührt (SE-01).
+Kein Hintergrundprozess, kein Scheduler.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Scheduler / Cron-Job
+|Option 2: Lazy Evaluation
+|Option 3: Verfall-Timestamp, kein Auto-Übergang
+
+|Kein externer Dienst erforderlich
+|{minus}
+|{plus}
+|{plus}
+
+|Testbarkeit (deterministisch, ohne Timing)
+|{minus}
+|{plus}
+|0
+
+|Konsistenz (Folgewirkungen atomar mit Trigger)
+|0
+|{plus}
+|{minus}
+
+|*Gesamt*
+|*−2*
+|*+3*
+|*0*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Kein externer Dienst und kein dauerhaft laufender Prozess notwendig — erfüllt die Rahmenbedingung.
+* Verfall-Check und Folgewirkungen laufen in derselben Transaktion; inkonsistente Zwischenzustände sind ausgeschlossen.
+* Zeitprovider ist austauschbar, Fristen bleiben vollständig testbar.
+
+*Negativ:*
+
+* Zwischen zwei Öffnungstagen bleibt ein verfallener Zustand formal bestehen, bis der nächste Zugriff erfolgt.
+* Jede betroffene Operation trägt die Prüflogik als Querschnittsverantwortung.
+
+==== Querverweise
+
+* SE-01: Beschreibung des Reservierungsverfalls und der Trigger-Punkte.
+* BR-30, BR-31, BR-33: Geschäftsregeln zu Reservierung, Verfall und Sperre in der Warteschlange.
+* PRD, Abschnitt „Rahmenbedingungen": _„Ein Prozess, lokal startbar, ohne externe Dienste."_
+
+---
+
+=== ADR-003: Sperre als Computed Property (kein gespeichertes Flag)
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Ein Mitglied ist gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist (BR-34, BR-35).
+Die Sperre endet, wenn alle überfälligen Ausleihen durch ein abgeschlossenes Prüfprotokoll bereinigt sind (BR-36).
+Drei Umsetzungsansätze stehen zur Wahl:
+
+. Stored Flag: Ein boolesches Feld `gesperrt` in der Mitglied-Tabelle, das asynchron durch Trigger oder Hintergrundprozess aktualisiert wird.
+. Computed Property: Der Sperrstatus wird bei jedem relevanten Zugriff aus den aktiven Ausleihen des Mitglieds neu berechnet (SE-02).
+. Event-sourced: Sperrereignisse werden als Ereignisse protokolliert; der aktuelle Status ergibt sich aus der Ereignisfolge.
+
+==== Entscheidung
+
+Option 2: Computed Property.
+Der Sperrstatus ist kein gespeichertes Feld, sondern wird bei jedem Zugriff aus den Ausleih- und Prüfdaten des Mitglieds abgeleitet.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Stored Flag (async)
+|Option 2: Computed Property
+|Option 3: Event-sourced
+
+|Konsistenz (kein veralteter Zustand möglich)
+|{minus}
+|{plus}
+|{plus}
+
+|Einfachheit der Implementierung
+|0
+|{plus}
+|{minus}
+
+|Keine Race-Conditions
+|{minus}
+|{plus}
+|0
+
+|*Gesamt*
+|*−2*
+|*+3*
+|*0*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Die Sperre ist stets aktuell — kein asynchroner Aktualisierungsprozess kann veraltete Zustände erzeugen.
+* Race-Conditions zwischen Sperrsetzung und Ausgabe sind strukturell ausgeschlossen.
+* Keine zusätzliche Tabellenspalte oder Migrationsstrategie erforderlich.
+
+*Negativ:*
+
+* Bei großen Ausleihmengen eines Mitglieds fällt eine Datenbankabfrage pro Zugriffsoperation an.
+* Die Berechnungslogik muss an allen relevanten Einstiegspunkten verfügbar sein.
+
+==== Querverweise
+
+* SE-02: Spezifikation der Sperre-Berechnung als Computed Property.
+* BR-34, BR-35, BR-36: Geschäftsregeln zur Sperre.
+* ADR-002: Lazy Evaluation für Reservierungsverfall nutzt dieselbe Computed-Property-Logik (BR-33).
+
+---
+
+=== ADR-004: Expliziter Nachzustand im Prüfprotokoll
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Nach Abschluss der Prüfung muss der Gegenstandszustand eindeutig feststehen.
+Erlaubte Folgezustände sind: _verfügbar_, _wartungsfällig_, _ausgemustert_ und _verloren_.
+Drei Ansätze stehen zur Wahl:
+
+. Expliziter Nachzustand: Der Wart wählt den Nachzustand explizit aus einer Enum-Liste.
+. Abgeleiteter Zustand: Das System leitet den Zustand aus Kautionsabzug und Nutzungszähler ab.
+. Mehrere getrennte Felder: Separate boolesche Felder für „beschädigt", „verloren", „wartungsfällig".
+
+==== Entscheidung
+
+Option 1: Expliziter Nachzustand.
+Das Prüfprotokoll enthält ein Pflichtfeld `nachzustand` vom Typ Enum.
+Der Wart setzt ihn explizit; das System leitet nichts ab.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Expliziter Nachzustand (Enum)
+|Option 2: Abgeleitet aus Kautionsabzug / Zähler
+|Option 3: Mehrere getrennte Felder
+
+|Eindeutigkeit (genau ein Folgezustand)
+|{plus}
+|{minus}
+|{minus}
+
+|Testbarkeit
+|{plus}
+|{minus}
+|0
+
+|Domänenklarheit (Wart entscheidet, System vollzieht)
+|{plus}
+|{minus}
+|0
+
+|*Gesamt*
+|*+3*
+|*−3*
+|*0*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Der Gegenstandszustand nach der Prüfung ist in jedem Fall eindeutig und direkt aus dem Protokoll ablesbar.
+* Tests können den Nachzustand direkt prüfen, ohne Ableitung nachzubilden.
+* Das fachliche Wissen des Warts ist direkt im Protokoll kodiert.
+
+*Negativ:*
+
+* Der Wart muss den Nachzustand aktiv wählen; ein vergessenes Feld führt zu einem Validierungsfehler.
+* Die Enum-Liste muss bei neuen Domänenzuständen erweitert werden.
+
+==== Querverweise
+
+* PRD, Abschnitt „Rückgabe und Prüfung": _„Der Nachzustand wird explizit gesetzt, nicht aus anderen Feldern abgeleitet."_
+* PRD, Abschnitt „Zustandsautomat des Gegenstands": erlaubte Übergänge aus _in Prüfung_.
+
+---
+
+=== ADR-005: Trennung von Thekendienst und Wart bei der Kautionsentscheidung
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Bei der Rückgabe steht das Mitglied dem Thekendienst gegenüber.
+Der Wart sieht den Gegenstand erst Tage später.
+Die Frage ist, wer über einen Kautionsabzug entscheidet.
+Drei Ansätze stehen zur Wahl:
+
+. Thekendienst entscheidet direkt bei Rückgabe an der Theke.
+. Wart entscheidet später nach fachlicher Prüfung des Gegenstands.
+. Beide Rollen dürfen entscheiden (geteilte Kompetenz).
+
+==== Entscheidung
+
+Option 2: Wart entscheidet.
+Die Rückgabe an der Theke versetzt den Gegenstand lediglich in den Zustand _in Prüfung_.
+Kautionsabzüge werden ausschließlich im Prüfprotokoll durch den Wart festgelegt.
+Die Theke kann Auffälligkeiten erfassen, trifft aber keine Kautionsentscheidung.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Thekendienst entscheidet
+|Option 2: Wart entscheidet
+|Option 3: Beide können entscheiden
+
+|Gleichbehandlung aller Mitglieder
+|{minus}
+|{plus}
+|{minus}
+
+|Fairness (sachkundige Entscheidung)
+|{minus}
+|{plus}
+|0
+
+|Vier-Augen-Prinzip / Interessentrennung
+|{minus}
+|{plus}
+|{minus}
+
+|*Gesamt*
+|*−3*
+|*+3*
+|*−2*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Kein Interessenkonflikt: Die Person, die dem Mitglied gegenübersteht, entscheidet nicht über dessen Geld.
+* Gleichbehandlung ist strukturell sichergestellt — unabhängig vom jeweiligen Thekendienst.
+* Die Entscheidungsgrundlage (Prüfprotokoll) ist dokumentiert und nachvollziehbar.
+
+*Negativ:*
+
+* Zwischen Rückgabe und Kautionsfreigabe entsteht eine zeitliche Lücke; das Mitglied erhält die Kaution nicht sofort zurück.
+* Der Wart muss erreichbar sein und Rückstände abarbeiten.
+
+==== Querverweise
+
+* PRD, Abschnitt „Rückgabe und Prüfung": _„Wer dem Mitglied gegenübersteht, soll nicht über dessen Geld entscheiden."_
+* PRD, Persona „Rolf, Werkstattwart": _„Er sieht die Geräte erst Tage nach der Rückgabe."_
+
+---
+
+=== ADR-006: Keine Authentifizierung in Release 1 — Rollen via Header
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Die REST-API muss rollenspezifische Operationen unterscheiden (Thekendienst, Wart, Mitglied).
+Drei Ansätze stehen zur Wahl:
+
+. Kein Auth: Die Rolle wird über einen HTTP-Header oder ein CLI-Flag mitgegeben und nicht kryptographisch geprüft.
+. JWT / OAuth 2.0: Token-basierte Authentifizierung mit Signaturprüfung.
+. API-Keys: Pro Rolle oder Nutzer ausgestellte langlebige Schlüssel.
+
+Das Risiko eines ungeprivilegiert gesendeten Rollenheaders ist durch STRIDE als Bedrohung T-001 (Spoofing) identifiziert und im Release-1-Scope bewusst akzeptiert.
+
+==== Entscheidung
+
+Option 1: Kein Auth, Rollen via Header.
+Die Rolle wird als HTTP-Header `X-Role` übergeben und nicht geprüft.
+Ein echtes Login ist ausdrücklich nicht Teil von Release 1.
+T-001 ist als akzeptiertes Risiko dokumentiert.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Kein Auth, Rolle via Header
+|Option 2: JWT / OAuth 2.0
+|Option 3: API-Keys
+
+|Implementierungsaufwand (Release 1)
+|{plus}
+|{minus}
+|0
+
+|Scope-Konformität (Release 1 explizit kein Login)
+|{plus}
+|{minus}
+|{minus}
+
+|Sicherheit gegen Spoofing (T-001)
+|{minus}
+|{plus}
+|0
+
+|*Gesamt*
+|*+1*
+|*−1*
+|*−1*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Vollständige Fokussierung auf Domänenlogik ohne Authentifizierungsinfrastruktur.
+* Testsuite kann alle Rollen ohne Token-Ausstellung abdecken.
+* Entspricht expliziter PRD-Rahmenbedingung.
+
+*Negativ:*
+
+* T-001 (Spoofing): Jeder Client kann jede Rolle annehmen — bewusst akzeptiertes Risiko für Release 1.
+* Ein Upgrade auf echte Authentifizierung in einem späteren Release erfordert eine Anpassung aller rollengeprüften Endpunkte.
+
+==== Querverweise
+
+* PRD, Abschnitt „Authentifizierung": _„Rollen werden über einen Header oder ein CLI-Flag mitgegeben und nicht geprüft."_
+* T-001: STRIDE-Bedrohung „Spoofing durch gefälschten Rollenheader" — akzeptiertes Risiko für Release 1.
+* ADR-001: REST-API-Entscheidung als Grundlage dieser Schnittstellengestaltung.
+
+---
+
+=== ADR-007: Einzelprozess ohne externe Dienste
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|*Status*
+|Akzeptiert
+
+|*Datum*
+|2026-08-24
+|===
+
+==== Kontext
+
+Das System muss von einem Verein mit ehrenamtlichem IT-Betrieb betrieben werden.
+Das Betriebsmodell bestimmt den Komplexitätsgrad der Infrastruktur.
+Drei Ansätze stehen zur Wahl:
+
+. Microservices: Mehrere eigenständige Dienste mit eigenen Deployment-Einheiten.
+. Single Process mit lokaler Datenbank: Eine ausführbare Datei, eine lokale Datenbank, kein externer Dienst.
+. Serverless: Funktionen in einer Cloud-Plattform.
+
+==== Entscheidung
+
+Option 2: Single Process mit lokaler Datenbank.
+Das System besteht aus einem einzigen Prozess, der lokal startbar ist und keine externen Dienste benötigt.
+Kein Mailversand, keine Zahlungsanbindung, keine Cloud-Abhängigkeit.
+
+==== Pugh-Matrix
+
+[cols="4,^2,^2,^2", options="header"]
+|===
+|Kriterium
+|Option 1: Microservices
+|Option 2: Single Process + lokale DB
+|Option 3: Serverless
+
+|Betriebsaufwand (Verein, ehrenamtlich)
+|{minus}
+|{plus}
+|{minus}
+
+|Externe Abhängigkeiten
+|{minus}
+|{plus}
+|{minus}
+
+|Einfachheit (Deployment, Debugging)
+|{minus}
+|{plus}
+|0
+
+|*Gesamt*
+|*−3*
+|*+3*
+|*−2*
+|===
+
+==== Konsequenzen
+
+*Positiv:*
+
+* Minimaler Betriebsaufwand: Start mit einem einzigen Befehl, keine externe Infrastruktur.
+* Kein Single Point of Failure durch externe Abhängigkeiten.
+* Einfaches lokales Testen und Debuggen.
+* Entspricht der Vereinssituation: Öffnung nur zweimal pro Woche, Ausfall dazwischen folgenlos.
+
+*Negativ:*
+
+* Horizontale Skalierung ist nicht vorgesehen; bei deutlichem Wachstum wäre ein Architekturschnitt nötig.
+* Alle Komponenten laufen im selben Prozess — ein kritischer Fehler betrifft das Gesamtsystem.
+
+==== Querverweise
+
+* PRD, Abschnitt „Betrieb": _„Ein Prozess, lokal startbar, ohne externe Dienste."_
+* PRD, Abschnitt „Qualitätsziele": Verfügbarkeit ist explizit kein Qualitätsziel.
+* ADR-002: Lazy Evaluation für Reservierungsverfall setzt das Fehlen eines Hintergrundprozesses voraus.
+
+
+
+
+

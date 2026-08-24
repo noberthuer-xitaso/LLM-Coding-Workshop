@@ -1,0 +1,297 @@
+:jbake-title: Quality Requirements
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 10
+:filename: /chapters/10_quality_requirements.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-quality-scenarios]]
+== 10. Qualitätsanforderungen
+
+Dieses Kapitel konkretisiert die in xref:01_introduction_and_goals.adoc#_qualitätsziele[Kapitel 1.2] formulierten Qualitätsziele als messbare Quality Attribute Scenarios nach ISO/IEC 25010.
+Jedes Szenario folgt dem 6-teiligen Schema: _Source → Stimulus → Artifact → Environment → Response → Response Measure_.
+
+Die mit ★ markierten Szenarien (QS-01, QS-02, QS-07) sind direkte Konkretisierungen der Top-3-Qualitätsziele aus Kapitel 1.2.
+
+=== 10.1 Qualitätsbaum
+
+[cols="1,2,3", options="header"]
+|===
+|Prio |ISO/IEC 25010-Charakteristikum |Konkretisierung im System
+
+|1
+|Functional Suitability
+|Korrekte Kautionsberechnung (BR-04) und vollständige, fehlerfreie Zustandsmaschine
+
+|2
+|Security
+|Keine Ausgabe ohne Einweisung, unabhängig von der genutzten Schnittstelle
+
+|3
+|Reliability
+|Transaktionsatomarität bei Prüfprotokoll-Abschluss; kein Partialdatenzustand
+
+|4
+|Performance Efficiency
+|Ausgabefähigkeitsprüfung < 300 ms am P95
+
+|5
+|Maintainability
+|DateProvider ist austauschbar; Fristen- und Sperrenlogik bleibt testbar
+
+|6
+|Usability
+|Fehlerantworten sind maschinenlesbar (Fehlercode-String)
+
+|7
+|Compatibility
+|REST-API liefert korrekten Content-Type für alle Endpunkte
+
+|8
+|Portability
+|Service startet ohne OS-spezifische Anpassungen auf Linux, macOS und Windows
+|===
+
+=== 10.2 Quality Attribute Scenarios
+
+==== QS-01 — Kautionsberechnung korrekt ★ (Functional Suitability, Korrektheit)
+
+_Konkretisierung von Top-Qualitätsziel 1: Korrektheit (BR-04)_
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Entwickler / automatisierte Testsuite
+
+|Stimulus
+|1 000 zufällig gewählte Wiederbeschaffungswerte (WBW) werden als Eingabe an `KautionsKalkulator.berechne(wbw)` übergeben.
+
+|Artifact
+|`KautionsKalkulator` (Domänenkomponente)
+
+|Environment
+|Unit-Test-Lauf in der CI-Pipeline; keine externe Abhängigkeit
+
+|Response
+|Für jeden WBW wird ein Betrag in ganzen Euro zurückgeliefert, der innerhalb der Grenzen [5, 100] liegt und kaufmännisch gerundet ist (≥ 0,5 aufgerundet).
+
+|Response Measure
+|0 Fehler bei 1 000 Aufrufen. Testfall schlägt fehl, wenn ein Ergebnis < 5 €, > 100 € oder nicht ganzzahlig ist oder das kaufmännische Runden verletzt.
+|===
+
+==== QS-02 — Zustandsübergänge vollständig und restriktiv ★ (Functional Suitability, Korrektheit)
+
+_Konkretisierung von Top-Qualitätsziel 1: Korrektheit (Zustandsmaschine)_
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Entwickler / automatisierte Testsuite
+
+|Stimulus
+|Automatisierter Test ruft jeden der 12 erlaubten Übergänge einmal auf und versucht zusätzlich alle nicht erlaubten Kombinationen.
+
+|Artifact
+|Zustandsmaschine des Gegenstands (Domänenmodell / `GegenstandService`)
+
+|Environment
+|Unit-Test-Lauf; Zustand wird im In-Memory-Repository gehalten
+
+|Response
+|Alle 12 erlaubten Übergänge enden im korrekten Nachzustand. Jeder nicht erlaubte Übergangsversuch wird mit einer dedizierten Domänenausnahme abgelehnt; kein Zustand wird verändert.
+
+|Response Measure
+|0 fehlerhafte Nachzustände bei erlaubten Übergängen. 0 unerlaubt ausgeführte Übergänge. Nachgewiesen durch je einen parametrisierten Testfall pro Übergang.
+|===
+
+==== QS-03 — Ausgabefähigkeitsprüfung unter 300 ms (Performance Efficiency)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Thekendienst (Lasttest-Skript)
+
+|Stimulus
+|100 aufeinanderfolgende HTTP-GET-Anfragen an den Endpunkt „Ausgabefähigkeit prüfen" bei einem Datenbestand von 400 Gegenständen und 800 Mitgliedern.
+
+|Artifact
+|REST-Endpunkt `GET /gegenstände/{id}/ausgabefaehigkeit` inkl. `SperrPrüfer` und Einweisungsprüfung
+
+|Environment
+|Produktionsnahe Umgebung; Datenbank mit realitätsnahem Datenbestand; Single-Process-Deployment
+
+|Response
+|Jede Anfrage liefert eine vollständige Antwort (Ausgabe erlaubt / abgelehnt + Ablehnungsgrund).
+
+|Response Measure
+|Antwortzeit < 300 ms am 95. Perzentil (P95) über 100 Aufrufe. Gemessen end-to-end ab HTTP-Request.
+|===
+
+==== QS-04 — Korrekter Content-Type in REST-Antworten (Compatibility)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Integrations-Testsuite / API-Consumer
+
+|Stimulus
+|Aufruf jedes REST-Endpunkts mit einer gültigen Anfrage.
+
+|Artifact
+|REST-API (alle Endpunkte)
+
+|Environment
+|Integrations-Test gegen laufenden Service (Testdatenbank)
+
+|Response
+|Jede Antwort enthält den HTTP-Header `Content-Type: application/json` (oder `application/json; charset=UTF-8`).
+
+|Response Measure
+|0 Endpunkte ohne korrekten Content-Type-Header. Nachgewiesen durch je einen Integrations-Testfall pro Endpunkt.
+|===
+
+==== QS-05 — Maschinenlesbare Fehlercodes (Usability)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Thekendienst-Client-Applikation
+
+|Stimulus
+|Anfrage schlägt aus einem fachlichen Grund fehl (z. B. Mitglied gesperrt, Einweisung fehlt, Ausleihlimit erreicht).
+
+|Artifact
+|REST-API Fehlerantwort (alle Endpunkte mit fachlicher Validierung)
+
+|Environment
+|Normalbetrieb
+
+|Response
+|Die JSON-Fehlerantwort enthält ein Feld `fehlercode` mit einem stabilen String-Bezeichner (z. B. `MITGLIED_GESPERRT`, `EINWEISUNG_FEHLT`) zusätzlich zur menschenlesbaren Nachricht.
+
+|Response Measure
+|Der Thekendienst kann jeden fachlichen Fehlerfall programmgesteuert unterscheiden, ohne die API-Dokumentation zu lesen. Nachgewiesen durch automatisierten Test je definiertem Fehlercode.
+|===
+
+==== QS-06 — Transaktionsatomarität beim Prüfprotokoll-Abschluss (Reliability)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Chaos-Test (injizierter Datenbankfehler)
+
+|Stimulus
+|Während des Prüfprotokoll-Abschlusses wird nach dem Schreiben des Prüfprotokolls, aber vor dem Schreiben des Kautionseintrags ein Datenbankfehler injiziert.
+
+|Artifact
+|`PrüfService` / Datenbank-Transaktion
+
+|Environment
+|Integrations-Test mit Fehlerinjektion
+
+|Response
+|Die Datenbank wird vollständig zurückgerollt: Weder Prüfprotokoll noch Kautionseintrag noch Gegenstandszustandswechsel sind persistent gespeichert. Das System meldet einen Fehler an den Aufrufer.
+
+|Response Measure
+|0 partielle Zustände nach injiziertem Fehler. Nachgewiesen durch Chaos-Test mit anschließender Datenbankinspektion (alle betroffenen Tabellen geprüft).
+|===
+
+==== QS-07 — Keine Ausgabe ohne Einweisung ★ (Security)
+
+_Konkretisierung von Top-Qualitätsziel 2: Sicherheit_
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Mitglied ohne dokumentierte Einweisung
+
+|Stimulus
+|Das Mitglied versucht, ein einweisungspflichtiges Gerät über alle verfügbaren Schnittstellen (REST-API, CLI) auszuleihen.
+
+|Artifact
+|`AusleiheService` (Einweisungsprüfung, BR-08), REST-Controller, CLI-Handler
+
+|Environment
+|Normalbetrieb; Mitglied ist nicht gesperrt, Ausleihlimit nicht erreicht, Gegenstand verfügbar — nur die Einweisung fehlt.
+
+|Response
+|Jeder Aufruf über jede Schnittstelle wird mit einem Fehler abgelehnt. Der Gegenstand wechselt nicht in den Zustand „ausgeliehen".
+
+|Response Measure
+|0 erfolgreiche Ausgaben ohne Einweisung über alle Schnittstellen. Je ein automatisierter Testfall pro Schnittstelle (mindestens REST-API und CLI).
+|===
+
+==== QS-08 — DateProvider ist austauschbar (Maintainability)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Entwickler / Testsuite
+
+|Stimulus
+|Ein Integrations-Test ersetzt den produktiven `DateProvider` durch einen `TestDateProvider`, der ein fest eingestelltes Datum liefert.
+
+|Artifact
+|`DateProvider`-Schnittstelle, `AusleiheService` (Rückgabefrist-Berechnung), `SperrPrüfer` (Überfälligkeitsprüfung)
+
+|Environment
+|Integrations-Test; alle anderen Produktionskomponenten bleiben unverändert
+
+|Response
+|Die Rückgabefrist-Berechnung (BR-09) und die Sperren-Prüfung (BR-34, BR-35) verwenden das vom `TestDateProvider` gelieferte Datum. Kein Produktionscode muss angepasst werden.
+
+|Response Measure
+|Alle Fristberechnungen und Sperren-Checks liefern korrekte Ergebnisse relativ zum injizieren Testdatum. Nachgewiesen durch parametrisierte Integrations-Tests mit mindestens drei verschiedenen Testdaten (Frist in der Zukunft, heute, vergangen).
+|===
+
+==== QS-09 — Plattformunabhängiger Start (Portability)
+
+[cols="1,3", options="header"]
+|===
+|Feld |Inhalt
+
+|Source
+|Betreiber / DevOps
+
+|Stimulus
+|Service wird auf Linux (x86-64), macOS (ARM) und Windows 10 (x86-64) gestartet, jeweils mit leerem Datenbestand.
+
+|Artifact
+|Gesamter Service (Single-Process-Deployment)
+
+|Environment
+|Frische Installation; keine vorherige Konfiguration; nur Laufzeitumgebung (JVM / Runtime) vorhanden
+
+|Response
+|Service startet fehlerfrei, antwortet auf `GET /health` mit HTTP 200 und nimmt Anfragen entgegen.
+
+|Response Measure
+|0 OS-spezifische Fehler beim Start. Kein Einsatz von OS-spezifischen APIs, Pfad-Trennzeichen-Abhängigkeiten oder nativen Bibliotheken ohne plattformunabhängige Alternative.
+|===
+
+
+
+
+
+

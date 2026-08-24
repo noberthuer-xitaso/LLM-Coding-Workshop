@@ -1,0 +1,108 @@
+:jbake-title: Context and Scope
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 3
+:filename: /chapters/03_context_and_scope.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-context-and-scope]]
+== Kontextabgrenzung
+
+_Leihgut_ ist ein in sich geschlossenes System ohne Laufzeit-Abhängigkeiten zu externen Diensten.
+Die Abgrenzung nach außen wird durch das folgende C4-Level-1-Diagramm (System Context) und die anschließende Schnittstellenbeschreibung vollständig beschrieben.
+
+=== Fachlicher Kontext
+
+[plantuml, context-diagram, svg]
+....
+@startuml
+!include <C4/C4_Context.puml>
+
+LAYOUT_WITH_LEGEND()
+
+title Systemkontextdiagramm — Leihgut (C4 Level 1)
+
+Person(karim, "Thekendienst", "Ehrenamtliche Thekenkraft.\nGibt Gegenstände aus und nimmt sie zurück.")
+Person(sabine, "Mitglied", "Leiht Gegenstände aus.\nKann Gegenstände vormerken.")
+Person(rolf, "Wart", "Prüft zurückgegebene Gegenstände.\nVerwaltet Wartung und Ausmusterung.\nEntscheidet über Kautionsabzüge.")
+
+System(leihgut, "Leihgut", "Verwaltet Ausleihen, Kautionen,\nVormerkungen, Wartung und Prüfprotokolle\nfür eine Bibliothek der Dinge.")
+
+System_Ext(mitgliederverwaltung, "Mitgliederverwaltung", "Externes System des Vereins.\nFührt Mitglied-IDs, Beiträge\nund Ein-/Austritte.\nAusserhalb des Scope von Leihgut.")
+
+System_Ext(kasse, "Kasse / Bargeld", "Physische Bargeldverwaltung\nan der Theke.\nKein digitales Interface.")
+
+Rel(karim, leihgut, "Ausgabe, Rückgabe, Statusabfragen", "REST-API\nX-Role: thekendienst")
+Rel(sabine, leihgut, "Verfügbarkeitsabfragen, Vormerkungen", "REST-API\nX-Role: mitglied")
+Rel(rolf, leihgut, "Prüfprotokolle, Wartung, Ausmusterung,\nKatalogpflege", "REST-API + CLI\nX-Role: wart")
+
+Rel_Back(leihgut, mitgliederverwaltung, "Mitglied-IDs importieren\n(manueller Read-only-Import,\naußerhalb Scope)", "CSV / manuell")
+
+Rel(karim, kasse, "Kaution bar entgegennehmen\noder auszahlen", "Bargeld")
+
+@enduml
+....
+
+[cols="1,2,3,2", options="header"]
+|===
+|Nachbarsystem |Typ |Kommunikation |Richtung
+
+|Thekendienst (Karim)
+|Mensch / primärer Nutzer
+|REST-API; HTTP-Header `X-Role: thekendienst`; JSON
+|bidirektional (Anfrage / Antwort)
+
+|Mitglied (Sabine)
+|Mensch / primärer Nutzer
+|REST-API; HTTP-Header `X-Role: mitglied`; JSON
+|bidirektional (Anfrage / Antwort)
+
+|Wart (Rolf)
+|Mensch / primärer Nutzer
+|REST-API; HTTP-Header `X-Role: wart`; JSON +
+CLI; Flag `--role wart`; Textausgabe
+|bidirektional (Anfrage / Antwort)
+
+|Mitgliederverwaltung
+|Externes System (außerhalb Scope)
+|Manueller Read-only-Import von Mitglied-IDs; kein Laufzeit-Interface; kein API-Aufruf während des Betriebs
+|eingehend (import-only)
+
+|Kasse / Bargeld
+|Externes System (physisch)
+|Kein digitales Interface. Das System bucht Kautionsbewegungen; der tatsächliche Bargeldfluss liegt außerhalb des Systems.
+|keine digitale Verbindung
+|===
+
+=== Technischer Kontext
+
+[cols="1,2,2", options="header"]
+|===
+|Kanal |Protokoll / Format |Nutzende Rollen
+
+|HTTP REST-API
+|HTTP/1.1; JSON (`application/json`); +
+Statuscode-Semantik: 200/201 Erfolg, 422 fachliche Ablehnung, 404 nicht gefunden, 403 fehlende Einweisung / Rollenfehler
+|Thekendienst, Mitglied, Wart
+
+|CLI
+|Kommandozeilenargumente; UTF-8-Textausgabe; +
+Exit Code 0 Erfolg, Exit Code 1 fachlicher Fehler, Exit Code 2 technischer Fehler
+|Wart
+
+|Lokale Persistenz
+|Eingebettete Datenbank oder Flat-File im Prozess; kein Netzwerkzugriff zur Laufzeit
+|intern (keine externe Schnittstelle)
+
+|Datumsquelle (intern)
+|Injizierbare Strategy; im Produktionsbetrieb: Systemdatum; in Tests: konfigurierbarer Fixwert
+|intern (keine externe Schnittstelle)
+|===
+
+Das System öffnet genau einen TCP-Port für die REST-API.
+Es gibt keine weiteren Netzwerkverbindungen.

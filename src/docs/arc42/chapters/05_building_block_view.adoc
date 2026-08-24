@@ -1,0 +1,770 @@
+:jbake-title: Bausteinsicht
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 5
+:filename: /chapters/05_building_block_view.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+[[section-building-block-view]]
+
+== 5. Bausteinsicht
+
+Die Bausteinsicht beschreibt die statische Zerlegung des Systems _Leihgut_ in Bausteine (Module, Komponenten, Schichten) sowie deren Abhängigkeiten.
+Das System folgt einer *Layered Architecture* mit vier Schichten und strikter Abhängigkeitsrichtung nach innen (Dependency Inversion Principle).
+An Schichtgrenzen werden ausschließlich DTOs und explizite Port-Interfaces übergeben — keine Domänen-Entities werden nach außen exponiert.
+
+=== Ebene 1: Whitebox Gesamtsystem (C4 Level 2 — Container)
+
+==== Übersichtsdiagramm
+
+[plantuml, container-diagram, svg]
+....
+@startuml Leihgut_Container
+!include <C4/C4_Container.puml>
+
+LAYOUT_WITH_LEGEND()
+
+title Leihgut — C4 Container-Diagramm (Level 2)
+
+Person(mitglied,       "Mitglied",       "Leiht Gegenstände aus, merkt vor, verlängert (Sabine)")
+Person(thekendienst,   "Thekendienst",   "Gibt Gegenstände aus und nimmt zurück (Karim)")
+Person(wart,           "Werkstattwart",  "Prüft, wartet, mustert aus, entscheidet Kautionsabzüge (Rolf)")
+
+System_Boundary(leihgut, "Leihgut") {
+
+    Container(rest_api, "REST API", "HTTP / JSON", "Verarbeitet alle Anwendungsfälle UC-01–UC-09 über HTTP-Endpunkte.\nRollen werden per X-Role-Header übergeben.")
+
+    Container(cli, "CLI", "Kommandozeile", "Wart-Kommandos: Prüfprotokoll (UC-04),\nWartung abschließen (UC-06),\nVerloren melden (UC-07),\nEinweisung dokumentieren (UC-09).")
+
+    ContainerDb(datenbank, "Datenbank", "SQLite / PostgreSQL", "Persistiert alle Domänendaten:\nGegenstände, Kategorien, Mitglieder, Ausleihen,\nPrüfprotokolle, Kautionsbewegungen,\nVormerkungen, Reservierungen, Einweisungen, Audit-Log.")
+}
+
+Rel(mitglied,     rest_api, "Ausleihe anfragen, vormerken, verlängern", "HTTPS/JSON")
+Rel(thekendienst, rest_api, "Ausgabe, Rückgabe, Katalog einsehen",       "HTTPS/JSON")
+Rel(wart,         rest_api, "Prüfprotokoll, Wartung, Katalogpflege",     "HTTPS/JSON")
+Rel(wart,         cli,      "Prüfprotokoll, Wartung, Verloren, Einweisung", "Shell")
+
+Rel(rest_api, datenbank, "liest und schreibt", "SQL / ORM")
+Rel(cli,      datenbank, "liest und schreibt", "SQL / ORM")
+
+@enduml
+....
+
+==== Enthaltene Bausteine
+
+[cols="2,1,4", options="header"]
+|===
+|Baustein |Typ |Verantwortung
+
+|REST API
+|Container
+|Verarbeitet alle neun Anwendungsfälle (UC-01–UC-09) über HTTP/JSON.
+Nimmt Requests entgegen, delegiert an die Anwendungsschicht und gibt DTOs zurück.
+Keine Geschäftslogik — nur Protokolladaption und Fehlerübersetzung.
+
+|CLI
+|Container
+|Kommandozeilenschnittstelle für die Wart-Aufgaben UC-04, UC-06, UC-07 und UC-09.
+Teilt die Anwendungsschicht vollständig mit der REST API.
+Kein doppelter Anwendungscode.
+
+|Datenbank
+|Container
+|Einzige Persistenzschicht für alle Domänendaten.
+In Release 1 SQLite (lokal startbar, keine externe Dienste).
+PostgreSQL ist als Ersatz möglich ohne Änderung an der Domänenschicht.
+|===
+
+==== Wichtige Schnittstellen nach außen
+
+[cols="2,4", options="header"]
+|===
+|Schnittstelle |Beschreibung
+
+|`POST /ausleihen`
+|Ausgabe eines Gegenstands (UC-01): prüft alle Ausgabebedingungen (Zustand, Sperre, Einweisung, Ausleihlimit, Kaution), legt Ausleihe an.
+
+|`POST /ausleihen/{id}/pruefprotokoll`
+|Prüfprotokoll durch Wart (UC-04): schließt Ausleihe ab, löst Zustandsübergang am Gegenstand aus, verbucht Kautionsbewegungen.
+
+|`POST /vormerkungen`
+|Vormerkung anlegen (UC-05): prüft Limits, reiht in Warteschlange ein, erzeugt ggf. sofortige Reservierung.
+
+|`POST /gegenstaende/{nr}/wartung-abschliessen`
+|Wartung abschließen (UC-06): setzt Zustand auf verfügbar, Nutzungszähler auf null, löst Reservierung aus wenn Vormerker vorhanden.
+
+|CLI `pruefprotokoll`
+|Identische fachliche Operation wie REST-Pendant, Eingabe über Parameter/interaktiven Prompt.
+
+|CLI `wartung-abschliessen`
+|Identische fachliche Operation wie REST-Pendant.
+|===
+
+=== Ebene 2: Whitebox REST-API-Container (C4 Level 3 — Komponenten)
+
+==== Übersichtsdiagramm
+
+[plantuml, component-diagram, svg]
+....
+@startuml Leihgut_Components
+!include <C4/C4_Component.puml>
+
+LAYOUT_WITH_LEGEND()
+
+title Leihgut — C4 Component-Diagramm (Level 3): REST-API-Container
+
+ContainerDb_Ext(db, "Datenbank", "SQLite / PostgreSQL", "")
+
+Container_Boundary(api, "REST API") {
+
+    ' ── API-Schicht ──────────────────────────────────────────────────
+    Component(ausleihe_handler,      "AusleiheHandler",      "REST-Handler", "UC-01: POST /ausleihen\nUC-02: POST /ausleihen/{id}/verlaengerung\nUC-03: POST /ausleihen/{id}/rueckgabe\nGET  /ausleihen/{id}")
+    Component(pruefprotokoll_handler,"PruefprotokollHandler", "REST-Handler", "UC-04: POST /ausleihen/{id}/pruefprotokoll\nUC-07: POST /ausleihen/{id}/verloren")
+    Component(vormerkung_handler,    "VormerkungHandler",    "REST-Handler", "UC-05: POST /vormerkungen\nDELETE /vormerkungen/{id}\nGET /vormerkungen")
+    Component(wartung_handler,       "WartungHandler",       "REST-Handler", "UC-06: POST /gegenstaende/{nr}/wartung-abschliessen")
+    Component(katalog_handler,       "KatalogHandler",       "REST-Handler", "UC-08: CRUD /kategorien, /gegenstaende")
+    Component(einweisung_handler,    "EinweisungHandler",    "REST-Handler", "UC-09: POST /einweisungen\nDELETE /einweisungen/{id}\nGET /einweisungen")
+    Component(mitglied_handler,      "MitgliedHandler",      "REST-Handler", "GET /mitglieder, GET /mitglieder/{id}")
+    Component(audit_handler,         "AuditHandler",         "REST-Handler", "GET /audit, GET /audit/{id}")
+
+    ' ── Anwendungsschicht ─────────────────────────────────────────────
+    Component(ausleihe_svc,      "AusleiheService",      "UC-Service", "Prüft Ausgabebedingungen (BR-05–08),\nhinterlegt Kaution (BR-09),\nsetzt Rückgabefrist.")
+    Component(verlaengerung_svc, "VerlaengerungService", "UC-Service", "Prüft Verlängerbarkeit (BR-10–11),\nverlängert Rückgabefrist.")
+    Component(rueckgabe_svc,     "RueckgabeService",     "UC-Service", "Versetzt Gegenstand in Prüfung (BR-12–13).")
+    Component(pruefprotokoll_svc,"PruefprotokollService","UC-Service", "Schließt Ausleihe ab (BR-14–21),\nbucht Kaution, setzt Gegenstandzustand,\nlöst Reservierung aus.")
+    Component(vormerkung_svc,    "VormerkungService",    "UC-Service", "Verwaltet Warteschlange (BR-27–33),\nprüft Limits, erzeugt ggf. Reservierung.")
+    Component(wartung_svc,       "WartungService",       "UC-Service", "Schließt Wartung ab (BR-25–26),\nsetzt Nutzungszähler zurück.")
+    Component(verloren_svc,      "VerlorenService",      "UC-Service", "Erklärt Gegenstand verloren (BR-19),\nbehält Kaution ein, mustert aus.")
+    Component(katalog_svc,       "KatalogService",       "UC-Service", "CRUD Kategorie und Gegenstand (BR-01–04).")
+    Component(einweisung_svc,    "EinweisungService",    "UC-Service", "Dokumentiert Einweisungen (BR-08).")
+    Component(systemevent_svc,   "SystemEventService",   "Event-Service", "Reservierungsverfall (lazy bei Ausgabe/Prüfung, BR-31).\nSperre als computed Prädikat (BR-34–36).")
+
+    ' ── Infrastrukturschicht ──────────────────────────────────────────
+    Component(gegenstand_repo,  "GegenstandRepository",  "Repository-Impl.", "SQL-Implementierung:\nGegenstand + Kategorie persistieren.")
+    Component(ausleihe_repo,    "AusleiheRepository",    "Repository-Impl.", "SQL-Implementierung:\nAusleihe + Kautionsbewegung persistieren.")
+    Component(vormerkung_repo,  "VormerkungRepository",  "Repository-Impl.", "SQL-Implementierung:\nVormerkung + Reservierung persistieren.")
+    Component(audit_repo,       "AuditRepository",       "Repository-Impl.", "SQL-Implementierung:\nAudit-Log-Einträge schreiben/lesen.")
+    Component(date_provider,    "SystemDateProvider",    "Infrastruktur",    "Liefert aktuelles Datum.\nAustauschbar durch TestDateProvider in Tests.")
+}
+
+' Handler → Services
+Rel(ausleihe_handler,       ausleihe_svc,       "delegiert")
+Rel(ausleihe_handler,       verlaengerung_svc,  "delegiert")
+Rel(ausleihe_handler,       rueckgabe_svc,      "delegiert")
+Rel(pruefprotokoll_handler, pruefprotokoll_svc, "delegiert")
+Rel(pruefprotokoll_handler, verloren_svc,       "delegiert")
+Rel(vormerkung_handler,     vormerkung_svc,     "delegiert")
+Rel(wartung_handler,        wartung_svc,        "delegiert")
+Rel(katalog_handler,        katalog_svc,        "delegiert")
+Rel(einweisung_handler,     einweisung_svc,     "delegiert")
+Rel(audit_handler,          audit_repo,         "liest direkt")
+Rel(mitglied_handler,       ausleihe_repo,      "liest (Sperre-Prädikat via SystemEventService)")
+
+' Services → Repositories / DateProvider (über Ports)
+Rel(ausleihe_svc,       gegenstand_repo,  "liest/schreibt Gegenstand")
+Rel(ausleihe_svc,       ausleihe_repo,    "schreibt Ausleihe, Kaution")
+Rel(ausleihe_svc,       vormerkung_repo,  "prüft Reservierung")
+Rel(ausleihe_svc,       audit_repo,       "schreibt Audit")
+Rel(ausleihe_svc,       date_provider,    "liest Datum")
+Rel(verlaengerung_svc,  ausleihe_repo,    "liest/schreibt Ausleihe")
+Rel(verlaengerung_svc,  vormerkung_repo,  "prüft Vormerkung")
+Rel(verlaengerung_svc,  date_provider,    "liest Datum")
+Rel(rueckgabe_svc,      gegenstand_repo,  "schreibt Zustand")
+Rel(rueckgabe_svc,      ausleihe_repo,    "schreibt Rückgabe")
+Rel(pruefprotokoll_svc, gegenstand_repo,  "liest/schreibt Gegenstand")
+Rel(pruefprotokoll_svc, ausleihe_repo,    "schreibt Protokoll, Kaution")
+Rel(pruefprotokoll_svc, vormerkung_repo,  "prüft/erstellt Reservierung")
+Rel(pruefprotokoll_svc, audit_repo,       "schreibt Audit")
+Rel(pruefprotokoll_svc, systemevent_svc,  "delegiert Verfall-Prüfung")
+Rel(vormerkung_svc,     vormerkung_repo,  "liest/schreibt Vormerkung")
+Rel(vormerkung_svc,     gegenstand_repo,  "prüft Zustand")
+Rel(vormerkung_svc,     audit_repo,       "schreibt Audit")
+Rel(wartung_svc,        gegenstand_repo,  "liest/schreibt Gegenstand")
+Rel(wartung_svc,        vormerkung_repo,  "prüft/erstellt Reservierung")
+Rel(wartung_svc,        audit_repo,       "schreibt Audit")
+Rel(verloren_svc,       gegenstand_repo,  "schreibt Zustand ausgemustert")
+Rel(verloren_svc,       ausleihe_repo,    "schreibt Protokoll, Kaution")
+Rel(verloren_svc,       audit_repo,       "schreibt Audit")
+Rel(katalog_svc,        gegenstand_repo,  "CRUD Gegenstand/Kategorie")
+Rel(einweisung_svc,     ausleihe_repo,    "schreibt Einweisung")
+Rel(systemevent_svc,    vormerkung_repo,  "verfällt Reservierungen (lazy)")
+Rel(systemevent_svc,    date_provider,    "liest Datum")
+
+' Repositories → DB
+Rel(gegenstand_repo, db, "SQL")
+Rel(ausleihe_repo,   db, "SQL")
+Rel(vormerkung_repo, db, "SQL")
+Rel(audit_repo,      db, "SQL")
+
+@enduml
+....
+
+==== Enthaltene Komponenten
+
+===== API-Schicht
+
+Die Handler-Komponenten übersetzen HTTP-Requests in Service-Aufrufe und Service-Ergebnisse in HTTP-Responses.
+Sie enthalten keine Geschäftslogik (IOSP: Kompositions-Funktionen, keine Operationen).
+
+[cols="2,1,4", options="header"]
+|===
+|Komponente |Use Cases |Verantwortung
+
+|`AusleiheHandler`
+|UC-01, UC-02, UC-03
+|Nimmt Ausgabe-, Verlängerungs- und Rückgabe-Requests entgegen.
+Setzt `X-Role`-Header in Kontext.
+Übersetzt Domänenfehler in HTTP 4xx.
+
+|`PruefprotokollHandler`
+|UC-04, UC-07
+|Prüfprotokoll anlegen (Wart) und Verloren melden.
+Nur Rolle `wart`.
+
+|`VormerkungHandler`
+|UC-05
+|Vormerkung anlegen, stornieren, auflisten.
+
+|`WartungHandler`
+|UC-06
+|Wartung abschließen.
+Nur Rolle `wart`.
+
+|`KatalogHandler`
+|UC-08
+|CRUD für Kategorien und Gegenstände.
+Zustandsändernde Operationen nur für Rolle `wart`.
+
+|`EinweisungHandler`
+|UC-09
+|Einweisung dokumentieren und widerrufen.
+Nur Rolle `wart`.
+
+|`MitgliedHandler`
+|—
+|Mitglied abrufen inkl. berechnetem Sperr-Prädikat.
+
+|`AuditHandler`
+|—
+|Audit-Log abrufen und filtern (read-only).
+|===
+
+===== Anwendungsschicht (UC-Services)
+
+Jeder Service kapselt genau einen Anwendungsfall.
+Services sind reine Kompositionen: Sie orchestrieren Repositories, Domain Services und DateProvider — sie selbst enthalten keine primitiven Berechnungen (IOSP).
+
+[cols="2,4", options="header"]
+|===
+|Service |Fachliche Verantwortung (Schlüsselregeln)
+
+|`AusleiheService`
+|Prüft in definierter Reihenfolge: Gegenstandzustand (BR-05), Ausleihlimit (BR-06), Sperre (BR-07), Einweisung (BR-08).
+Bei Bestehen: legt Ausleihe an, hinterlegt Kaution (BR-09), setzt Rückgabefrist, schreibt Audit.
+
+|`VerlaengerungService`
+|Prüft: nicht bereits verlängert (BR-10), keine Vormerkung in Kategorie (BR-11), nicht überfällig (BR-11).
+Verlängert Frist um volle Leihdauer. Schreibt Audit.
+
+|`RueckgabeService`
+|Versetzt Gegenstand von `ausgeliehen` → `in_Prüfung` (BR-12).
+Erfasst Auffälligkeiten als Freitext (BR-13).
+Beendet die Ausleihe nicht.
+
+|`PruefprotokollService`
+|Transaktionaler Kernprozess: legt Prüfprotokoll an (BR-14–18), schließt Ausleihe ab, verbucht Kautionsabzug und Freigabe (BR-20–21), erhöht Nutzungszähler (BR-23), setzt Gegenstandzustand (BR-17, BR-24), löst Reservierung aus wenn Vormerker vorhanden (BR-30).
+
+|`VormerkungService`
+|Prüft: max. eine Vormerkung je Mitglied/Kategorie (BR-28).
+Reiht in FIFO-Warteschlange ein (BR-29).
+Erstellt ggf. sofortige Reservierung wenn Gegenstand verfügbar (BR-30).
+
+|`WartungService`
+|Setzt wartungsfälligen Gegenstand auf `verfügbar`, Nutzungszähler auf 0 (BR-25–26).
+Erstellt Reservierung wenn Vormerker vorhanden (BR-30).
+
+|`VerlorenService`
+|Legt Prüfprotokoll mit `nachzustand = verloren` an (BR-19).
+Behält Kaution vollständig ein. Versetzt Gegenstand in `ausgemustert`.
+
+|`KatalogService`
+|CRUD für `Kategorie` und `Gegenstand` (BR-01–04).
+Berechnet und validiert Kautionsbetrag bei Anlage (BR-04).
+Verhindert Kategorienwechsel bei aktiven Ausleihen.
+
+|`EinweisungService`
+|Legt Einweisungsdokument an / entzieht es (BR-08).
+Einweisung hängt an Mitglied + Kategorie.
+
+|`SystemEventService`
+|Bewertet Reservierungsverfall lazy (beim nächsten relevanten Ereignis, BR-31).
+Berechnet Sperr-Prädikat als computed view (BR-34–36): kein persistiertes Boolean.
+|===
+
+===== Infrastrukturschicht
+
+[cols="2,4", options="header"]
+|===
+|Komponente |Verantwortung
+
+|`GegenstandRepository`
+|Implementiert Port `IGegenstandRepository`.
+Persistiert `Gegenstand` und `Kategorie`.
+Liefert Gegenstand mit aktuellem Zustand und Nutzungszähler.
+
+|`AusleiheRepository`
+|Implementiert Port `IAusleiheRepository`.
+Persistiert `Ausleihe`, `Pruefprotokoll`, `Kautionsbewegung`, `Einweisung`.
+
+|`VormerkungRepository`
+|Implementiert Port `IVormerkungRepository`.
+Persistiert `Vormerkung` und `Reservierung`.
+Liefert FIFO-geordnete Warteschlange je Kategorie.
+
+|`AuditRepository`
+|Implementiert Port `IAuditRepository`.
+Schreibt und liest unveränderliche Audit-Log-Einträge.
+
+|`SystemDateProvider`
+|Implementiert Port `IDateProvider`.
+Liefert `LocalDate.now()` im Produktivbetrieb.
+
+|`TestDateProvider`
+|Implementiert Port `IDateProvider`.
+Ermöglicht Fristtests durch injiziertes festes Datum.
+Nur für Test-Scope.
+|===
+
+=== Ebene 3: Whitebox Domänenschicht
+
+==== Klassendiagramm
+
+[plantuml, domain-model, svg]
+....
+@startuml Leihgut_Domain
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam classFontName Arial
+skinparam ArrowColor #444444
+skinparam ClassBorderColor #666666
+skinparam PackageBackgroundColor #F5F5F5
+skinparam PackageBorderColor #9E9E9E
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+hide empty methods
+
+' ═══════════════════════════════════════════════════════
+'  Enumerationen
+' ═══════════════════════════════════════════════════════
+
+enum GegenstandZustand {
+  verfügbar
+  ausgeliehen
+  in_Prüfung
+  reserviert
+  wartungsfällig
+  ausgemustert
+}
+
+enum AusleiheStatus {
+  aktiv
+  in_Prüfung
+  abgeschlossen
+}
+
+enum PruefprotokollNachzustand {
+  verfügbar
+  wartungsfällig
+  ausgemustert
+  verloren
+}
+
+enum KautionsbewegungArt {
+  hinterlegung
+  abzug
+  freigabe
+}
+
+' ═══════════════════════════════════════════════════════
+'  Aggregates & Entities
+' ═══════════════════════════════════════════════════════
+
+package "Katalog-Aggregat" {
+  class Kategorie <<Aggregate Root>> {
+    + id : UUID
+    + name : String
+    + leihdauerTage : Int
+    + wartungsintervallAusleihen : Int
+    + einweisungspflichtig : Boolean
+  }
+
+  class Gegenstand <<Entity>> {
+    + inventarnummer : String
+    + wiederbeschaffungswertEuro : Int
+    + zustand : GegenstandZustand
+    + nutzungszaehler : Int
+    --
+    + istAusgebbar() : Boolean
+    + istReservierbar() : Boolean
+    + wartungFaellig() : Boolean
+  }
+}
+
+package "Mitglied-Aggregat" {
+  class Mitglied <<Aggregate Root>> {
+    + id : UUID
+    + name : String
+  }
+  note right of Mitglied
+    gesperrt ist ein computed Prädikat
+    (SperrPrüfer), kein persistiertes Feld.
+  end note
+
+  class Einweisung <<Entity>> {
+    + id : UUID
+    + datum : Date
+    + dokumentiertVon : String
+  }
+}
+
+package "Ausleihe-Aggregat" {
+  class Ausleihe <<Aggregate Root>> {
+    + id : UUID
+    + ausgabeDatum : Date
+    + rueckgabefrist : Date
+    + rueckgabeDatum : Date {nullable}
+    + auffaelligkeiten : String {nullable}
+    + verlaengert : Boolean
+    + status : AusleiheStatus
+  }
+
+  class Kaution <<Value Object>> {
+    + betragEuro : Int
+    --
+    {static} berechnen(wbwEuro : Int) : Kaution
+    ' max(5, min(100, round(wbw × 0.20)))
+  }
+  note bottom of Kaution
+    Unveränderlich nach Hinterlegung.
+    BR-04: min 5, max 100 Euro.
+  end note
+
+  class Rueckgabefrist <<Value Object>> {
+    + datum : Date
+    --
+    {static} berechnen(ausgabe : Date,\n  leihdauerTage : Int) : Rueckgabefrist
+    + ueberfaellig(heute : Date) : Boolean
+  }
+
+  class Pruefprotokoll <<Entity>> {
+    + id : UUID
+    + wartId : String
+    + zeitstempel : DateTime
+    + nachzustand : PruefprotokollNachzustand
+    + kautionsabzugEuro : Int
+    + begruendung : String {nullable}
+    + vorschadenProtokollId : UUID {nullable}
+  }
+
+  class Kautionsbewegung <<Entity>> {
+    + id : UUID
+    + zeitstempel : DateTime
+    + art : KautionsbewegungArt
+    + betragEuro : Int
+    + pruefprotokollId : UUID {nullable}
+  }
+}
+
+package "Vormerkung-Aggregat" {
+  class Vormerkung <<Aggregate Root>> {
+    + id : UUID
+    + eingangZeitstempel : DateTime
+    + status : VormerkungStatus
+  }
+
+  class Reservierung <<Entity>> {
+    + id : UUID
+    + entstehungDatum : Date
+    + verfallDatum : Date
+    + status : ReservierungStatus
+    --
+    + istVerfallen(heute : Date) : Boolean
+  }
+  note right of Reservierung
+    verfallDatum = entstehung + 3 Tage.
+    BR-31.
+  end note
+}
+
+' ═══════════════════════════════════════════════════════
+'  Domain Services
+' ═══════════════════════════════════════════════════════
+
+package "Domain Services" {
+  class KautionsKalkulator <<Domain Service>> {
+    + {static} berechnen(wbwEuro : Int) : Kaution
+  }
+  note bottom of KautionsKalkulator
+    Reine Funktion (Operation).
+    Keine Seiteneffekte, kein I/O.
+  end note
+
+  class SperrPruefer <<Domain Service>> {
+    + istGesperrt(mitgliedId : UUID,\n  heute : Date,\n  ausleihen : List<Ausleihe>) : Boolean
+  }
+  note bottom of SperrPruefer
+    Computed Prädikat (BR-34–36).
+    Kein persistiertes Boolean.
+  end note
+}
+
+' ═══════════════════════════════════════════════════════
+'  Ports (Interfaces — Richtung innen)
+' ═══════════════════════════════════════════════════════
+
+package "Ports (Interfaces)" {
+  interface IGegenstandRepository {
+    + findByInventarnummer(nr : String) : Gegenstand
+    + findByKategorie(id : UUID) : List<Gegenstand>
+    + save(g : Gegenstand) : void
+    + saveKategorie(k : Kategorie) : void
+    + findKategorie(id : UUID) : Kategorie
+    + findAlleKategorien() : List<Kategorie>
+  }
+
+  interface IAusleiheRepository {
+    + save(a : Ausleihe) : void
+    + findById(id : UUID) : Ausleihe
+    + findAktiveByMitglied(id : UUID) : List<Ausleihe>
+    + savePruefprotokoll(p : Pruefprotokoll) : void
+    + saveKautionsbewegung(k : Kautionsbewegung) : void
+    + findEinweisung(mitgliedId : UUID,\n  kategorieId : UUID) : Optional<Einweisung>
+    + saveEinweisung(e : Einweisung) : void
+  }
+
+  interface IVormerkungRepository {
+    + save(v : Vormerkung) : void
+    + findAktiveByMitglied(id : UUID,\n  kategorieId : UUID) : Optional<Vormerkung>
+    + warteschlange(kategorieId : UUID) : List<Vormerkung>
+    + saveReservierung(r : Reservierung) : void
+    + findAktiveReservierung(gegenstandId : UUID) : Optional<Reservierung>
+  }
+
+  interface IAuditRepository {
+    + append(eintrag : AuditEintrag) : void
+    + findAll(filter : AuditFilter) : List<AuditEintrag>
+    + findById(id : UUID) : AuditEintrag
+  }
+
+  interface IDateProvider {
+    + heute() : LocalDate
+  }
+}
+
+' ═══════════════════════════════════════════════════════
+'  Beziehungen zwischen Aggregaten/Entities
+' ═══════════════════════════════════════════════════════
+
+Kategorie "1" <-- "0..*" Gegenstand        : kategorie_id
+Kategorie "1" <-- "0..*" Einweisung        : kategorie_id
+Kategorie "1" <-- "0..*" Vormerkung        : kategorie_id
+
+Mitglied "1" <-- "0..*" Einweisung         : mitglied_id
+Mitglied "1" <-- "0..*" Ausleihe           : mitglied_id
+Mitglied "1" <-- "0..*" Vormerkung         : mitglied_id
+
+Gegenstand "1" <-- "0..*" Ausleihe         : gegenstand_id
+Gegenstand "1" <-- "0..*" Reservierung     : gegenstand_id
+
+Ausleihe "1" *-- "1" Kaution               : enthält
+Ausleihe "1" *-- "1" Rueckgabefrist        : enthält
+Ausleihe "1" <-- "0..1" Pruefprotokoll     : ausleihe_id
+Ausleihe "1" <-- "1..*" Kautionsbewegung   : ausleihe_id
+
+Pruefprotokoll "0..1" <-- "0..*" Kautionsbewegung : pruefprotokoll_id
+
+Vormerkung "1" <-- "0..*" Reservierung     : vormerkung_id
+
+@enduml
+....
+
+==== Aggregate, Entities und Value Objects
+
+[cols="2,1,4", options="header"]
+|===
+|Klasse |Typ |Verantwortung / Invarianten
+
+|`Kategorie`
+|Aggregate Root
+|Gruppe gleichartiger Gegenstände. Bestimmt Leihdauer, Wartungsintervall, Einweisungspflicht (BR-02).
+
+|`Gegenstand`
+|Entity
+|Einzelnes physisches Exemplar mit eindeutiger Inventarnummer (BR-01).
+Hält Zustand und Nutzungszähler.
+Kennt eigene Ausgabe- und Reservierbarkeitsregeln.
+
+|`Mitglied`
+|Aggregate Root
+|Person, die ausleihen darf.
+Sperre ist kein persistiertes Feld sondern ein vom `SperrPrüfer` berechnetes Prädikat (BR-34–36).
+
+|`Einweisung`
+|Entity
+|Dokumentierte Unterweisung einer Person für eine Kategorie (BR-08).
+Hängt an Mitglied und Kategorie.
+
+|`Ausleihe`
+|Aggregate Root
+|Vorgang von Ausgabe bis Prüfungsabschluss.
+Enthält `Kaution` und `Rückgabefrist` als unveränderliche Value Objects.
+
+|`Kaution`
+|Value Object
+|Hinterlegter Betrag, berechnet nach `max(5, min(100, round(WBW × 0,20)))` (BR-04).
+Nach Hinterlegung unveränderlich.
+
+|`Rückgabefrist`
+|Value Object
+|Fälligkeitsdatum = Ausgabedatum + Leihdauer (BR-09).
+Kennt Methode `überfällig(heute)`.
+
+|`Prüfprotokoll`
+|Entity
+|Abschlussdokument einer Prüfung (BR-14–18).
+Enthält explizit gesetzten `nachzustand` und Kautionsabzug.
+
+|`Kautionsbewegung`
+|Entity
+|Unveränderlicher Buchungssatz (hinterlegung / abzug / freigabe).
+Bildet den vollständigen Audit-Trail der Kaution (BR-22).
+Saldo aller Bewegungen einer abgeschlossenen Ausleihe = 0 (INV-18).
+
+|`Vormerkung`
+|Aggregate Root
+|Platz in der Warteschlange einer Kategorie (BR-27–29).
+Max. eine aktive Vormerkung je Mitglied/Kategorie (BR-28).
+
+|`Reservierung`
+|Entity
+|Einem Mitglied für drei Tage zugeordneter Gegenstand (BR-31).
+Verfall und Überspringen bei gesperrtem Mitglied (BR-33).
+|===
+
+==== Domain Services
+
+[cols="2,4", options="header"]
+|===
+|Domain Service |Verantwortung
+
+|`KautionsKalkulator`
+|Berechnet den Kautionsbetrag aus dem Wiederbeschaffungswert (BR-04).
+Reine Funktion ohne Seiteneffekte.
+Folgt IOSP: ausschließlich Operation (primitive Berechnung), keine Komposition.
+
+|`SperrPrüfer`
+|Bewertet das Sperr-Prädikat eines Mitglieds (BR-34–36) auf Basis seiner aktiven Ausleihen und dem aktuellen Datum.
+Reine Funktion — kein I/O.
+Wird von `AusleiheService` und `VormerkungService` aufgerufen.
+|===
+
+==== Ports (Abhängigkeitsumkehr)
+
+Die Ports sind Interfaces in der Domänenschicht.
+Ihre Implementierungen liegen ausschließlich in der Infrastrukturschicht.
+Kein Domänen- oder Anwendungscode kennt konkrete Implementierungen.
+
+[cols="2,4", options="header"]
+|===
+|Port |Zweck
+
+|`IGegenstandRepository`
+|Laden und Persistieren von `Gegenstand` und `Kategorie`.
+
+|`IAusleiheRepository`
+|Laden und Persistieren von `Ausleihe`, `Prüfprotokoll`, `Kautionsbewegung`, `Einweisung`.
+
+|`IVormerkungRepository`
+|Verwalten von `Vormerkung` und `Reservierung` inkl. FIFO-Warteschlange.
+
+|`IAuditRepository`
+|Unveränderliches Schreiben und gefiltertes Lesen des Audit-Logs.
+
+|`IDateProvider`
+|Liefert das aktuelle Datum. Austauschbar für Frist-Tests (`TestDateProvider`).
+|===
+
+=== Schichtüberblick und Abhängigkeitsregeln
+
+[plantuml, layer-overview, svg]
+....
+@startuml Leihgut_Layers
+skinparam PackageStyle rectangle
+skinparam PackageBorderColor #888888
+skinparam PackageBackgroundColor #FAFAFA
+skinparam ArrowColor #CC3300
+skinparam ArrowThickness 2
+skinparam NoteFontSize 11
+
+package "API-Schicht\n(Interfaces)" as API #E3F2FD {
+  [REST-Handler\n(UC-01–UC-09)] as REST
+  [CLI-Adapter\n(UC-04, UC-06, UC-07, UC-09)] as CLI
+}
+
+package "Anwendungsschicht\n(Application)" as APP #E8F5E9 {
+  [UC-Services\n(AusleiheService, …)] as SVC
+  [SystemEventService] as EVT
+}
+
+package "Domänenschicht\n(Domain)" as DOM #FFF9C4 {
+  [Aggregate & Entities] as ENT
+  [Value Objects\n(Kaution, Rückgabefrist)] as VO
+  [Domain Services\n(KautionsKalkulator, SperrPrüfer)] as DS
+  [Ports / Interfaces\n(IGegenstandRepository, …)] as PORTS
+}
+
+package "Infrastrukturschicht\n(Infrastructure)" as INFRA #FCE4EC {
+  [Repository-Implementierungen\n(SQLite/PostgreSQL)] as REPOS
+  [SystemDateProvider\nTestDateProvider] as DATE
+}
+
+REST --> SVC : ruft auf
+CLI  --> SVC : ruft auf
+SVC  --> ENT  : verwendet
+SVC  --> DS   : delegiert Berechnung
+SVC  --> PORTS : ruft über Interface
+EVT  --> PORTS : ruft über Interface
+REPOS ..|> PORTS : implementiert
+DATE  ..|> PORTS  : implementiert
+
+note bottom of INFRA
+  Implementierungen kennen
+  die Ports (inward dependency).
+  Keine Domänenschicht kennt
+  konkrete Infrastruktur.
+end note
+
+note right of DOM
+  Keine Abhängigkeit nach außen.
+  Nur primitive Typen und
+  eigene Domänenobjekte.
+end note
+@enduml
+....
+
+Abhängigkeitsrichtung::
+Alle Pfeile zeigen von außen nach innen.
+Die Domänenschicht hat keine Abhängigkeit zur Infrastruktur- oder Anwendungsschicht.
+
+IOSP-Prinzip::
+Jede Funktion ist entweder *Komposition* (orchestriert andere Funktionen, kein primitiver Code) oder *Operation* (führt primitive Logik aus, keine Aufrufe von anderen Funktionen im System).
+Die UC-Services sind reine Kompositionen; `KautionsKalkulator` und `SperrPrüfer` sind reine Operationen.
+
+Anti-Corruption Layer::
+Der `MitgliedHandler` (GET /mitglieder) fungiert als Anti-Corruption Layer gegenüber einem zukünftigen externen Mitgliederverwaltungssystem.
+In Release 1 werden Mitglieder als einfache Datensätze verwaltet.
+Die Schnittstelle bleibt stabil, wenn Mitglieder später über ein externes System importiert werden.
+

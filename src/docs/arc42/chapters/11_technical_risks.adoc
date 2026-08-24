@@ -1,0 +1,102 @@
+:jbake-title: Risks and Technical Debts
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 11
+:filename: /chapters/11_technical_risks.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-technical-risks]]
+== 11. Technische Risiken und technische Schulden
+
+=== 11.1 Risikotabelle
+
+Risikostufe = Wahrscheinlichkeit × Impact (L=1, M=2, H=3).
+Stufen: L×L=1 (gering), bis H×H=9 (kritisch).
+
+[cols="1,3,2,1,1,1,3", options="header"]
+|===
+|Risiko-ID |Beschreibung |Kategorie |Wahrschein­lichkeit |Impact |Risiko­stufe |Mitigation / ADR-Referenz
+
+|R-01
+|*Keine Authentifizierung.* Rollen (Thekendienst, Wart, Mitglied) werden über einen HTTP-Header oder ein CLI-Flag übergeben und nicht kryptografisch geprüft. Jeder, der die API erreichbar hat, kann beliebige Rollen annehmen und so z. B. als Wart Kautionsabzüge vornehmen oder als Thekendienst Gegenstände ausgeben.
+|Security
+|H
+|H
+|9
+|Bewusstes Design-Kompromiss für Release 1 (PRD: „Ein echtes Login ist ausdrücklich nicht Teil dieses Systems"). Netzwerkzugang ist auf lokale Umgebung beschränkt. Authentifizierung ist als ADR-006 für Release 2 vorgemerkt. Audit-Log (BR-22) ermöglicht nachträgliche Analyse.
+
+|R-02
+|*Race Condition beim Reservierungsverfall (Lazy Evaluation).* Der Reservierungsverfall wird nicht zeitgesteuert, sondern erst beim nächsten Zugriff geprüft (lazy). Bei gleichzeitigen Anfragen (z. B. zwei Thekenkräfte gleichzeitig) könnte dieselbe verfallene Reservierung doppelt vergeben werden, wenn kein Datenbank-Locking erzwungen wird.
+|Correctness / Concurrency
+|M
+|H
+|6
+|Optimistic Locking oder SELECT FOR UPDATE beim Lesen der Reservierung vor Vergabe einsetzen. Transaktionsisolation auf READ COMMITTED oder höher setzen. Integrations-Test mit simulierten parallelen Anfragen.
+
+|R-03
+|*Computed Sperre bei hoher Ausleihlast.* Die Sperre eines Mitglieds ist kein persistent gespeicherter Zustand, sondern wird bei jedem Ausgabeversuch neu berechnet (alle Ausleihen des Mitglieds auf Überfälligkeit prüfen). Bei vielen gleichzeitigen Ausleihen und vielen Mitgliedern kann diese Abfrage die Response-Time-Grenze von 300 ms (QS-03) gefährden.
+|Performance
+|M
+|M
+|4
+|Index auf `(mitglied_id, rueckgabefrist, rueckgabe_datum)` anlegen. Bei Performance-Problemen materialisiertes Sperr-Flag als Cache einführen (invalidiert bei Prüfprotokoll-Abschluss). Lasttest QS-03 deckt dieses Risiko ab.
+
+|R-04
+|*Kein Login — Audit-Einträge nicht einer realen Person zuordenbar.* Da keine Authentifizierung stattfindet, enthält der Audit-Log zwar die übergebene Rollen-ID, aber keine verifizierten Nutzeridentitäten. Im Streitfall kann ein Eintrag nicht zweifelsfrei einer Person zugeordnet werden (Repudiation).
+|Security / Accountability
+|H
+|M
+|6
+|Audit-Log ist trotzdem zu führen (BR-22) und liefert den besten verfügbaren Nachweis. Für Release 2 zusammen mit R-01 durch echte Authentifizierung (ADR-006) adressieren. Organisatorisch: Theke ist immer mit Vereinsmitgliedern besetzt, die namentlich bekannt sind.
+
+|R-05
+|*SQLite-Locking bei Parallelbetrieb.* SQLite erlaubt nur einen gleichzeitigen Schreiber. Wenn mehrere Thekenkräfte (z. B. an zwei Tablets) gleichzeitig Ausleihen durchführen, kommt es zu Schreib-Blockaden oder Fehlern mit `SQLITE_BUSY`.
+|Reliability / Concurrency
+|M
+|M
+|4
+|WAL-Modus (Write-Ahead Logging) aktivieren, der parallele Lesezugriffe während eines Schreibvorgangs erlaubt. Retry-Logik mit Backoff für `SQLITE_BUSY` implementieren. Alternativ: Migration auf serverbasierte Datenbank (PostgreSQL) als Migrations-Pfad vorsehen, falls mehr als zwei gleichzeitige Schreiber benötigt werden.
+
+|R-06
+|*Datenbankdatei-Verlust ohne Backup.* Das System betreibt SQLite als Single-File-Datenbank. Ein Hardware-Defekt, versehentliches Löschen oder ein fehlgeschlagenes Upgrade ohne Backup führt zum vollständigen Verlust aller Ausleihdaten, Kautionsbewegungen und Prüfprotokolle.
+|Reliability / Data Integrity
+|L
+|H
+|3
+|Betriebsdokumentation schreibt tägliches File-Backup vor Öffnung vor (Kopie der SQLite-Datei). Zusätzlich: automatisches Backup-Skript als Cron-Job. Restore-Prozedur dokumentieren und quartalsweise testen.
+
+|R-07
+|*Uhrzeitdrift.* Die Sperre (BR-34/35) und der Reservierungsverfall (BR-31) basieren auf dem Systemdatum. Bei falsch gestellter Systemuhr kann eine Ausleihe fälschlicherweise als überfällig oder eine Reservierung als verfallen eingestuft werden — oder umgekehrt.
+|Correctness / Environment
+|L
+|M
+|2
+|NTP-Synchronisation auf dem Betriebsrechner sicherstellen. `DateProvider`-Abstraktion (QS-08) erlaubt nachträgliche Korrektur im Test. Im Fehlerfall: Wart kann Sperren manuell aufheben (als Vereinbarung, nicht als Feature).
+|===
+
+=== 11.2 Technische Schulden
+
+[cols="1,3,2,2", options="header"]
+|===
+|TD-ID |Beschreibung |Auswirkung |Geplante Adressierung
+
+|TD-01
+|*Keine Authentifizierung.* Rollen werden nicht verifiziert. Das System vertraut blindlings dem übergebenen Header oder Flag. Jeder mit Netzwerkzugang kann alle Aktionen ausführen.
+|Sicherheitslücke: unbefugte Rollenübernahme möglich (→ R-01, R-04)
+|Release 2: Einführung eines echten Login-Systems (z. B. API-Keys oder OAuth2) gemäß ADR-006.
+
+|TD-02
+|*Kein Rate-Limiting.* Die REST-API hat keine Schutzmaßnahme gegen übermäßig viele Anfragen. Ein fehlerhafter oder missbräuchlicher Client kann den Service durch hohe Anfragelast lahmlegen (Denial of Service).
+|Verfügbarkeitsrisiko bei Missbrauch; im Vereinsbetrieb mit lokalem Netzwerk gering, aber bei Internet-Exposition kritisch.
+|Release 2: Rate-Limiting auf API-Gateway-Ebene oder per Middleware einführen (z. B. Token Bucket, 60 req/min pro IP).
+|===
+
+
+
+
+

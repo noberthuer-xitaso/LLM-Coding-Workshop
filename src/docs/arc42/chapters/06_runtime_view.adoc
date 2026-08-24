@@ -1,0 +1,247 @@
+:jbake-title: Runtime View
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 6
+:filename: /chapters/06_runtime_view.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-runtime-view]]
+== 6. Laufzeitsicht
+
+Die Laufzeitsicht zeigt die wichtigsten Abläufe im Betrieb als Sequenzdiagramme.
+Alle vier Szenarien sind produktiv relevant und decken die kritischen Pfade der
+Geschäftslogik ab.
+
+=== Szenario 1: Erfolgreiche Ausleihe (UC-01)
+
+Karim scannt Inventarnummer und Mitgliedsnummer.
+Das System prüft alle Ausgabebedingungen (BR-05, BR-06, BR-07, BR-08, BR-26),
+berechnet die Kaution, legt die Ausleihe an, hinterlegt die Kaution und erzeugt
+einen Audit-Eintrag.
+Erst nach positiver Prüfung aller Regeln wird der Gegenstand auf `ausgeliehen` gesetzt.
+
+[plantuml, szenario-01-ausleihe, svg]
+....
+@startuml
+skinparam sequenceArrowThickness 1.5
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 200
+skinparam BoxPadding 10
+
+actor       "Thekendienst\n(Karim)"   as Theke
+participant "REST-API"                as API
+participant "AusleiheService"         as Service
+participant "Ausleihe\n(Domain)"      as Domain
+participant "GegenstandRepository"    as GRepo
+participant "AusleiheRepository"      as ARepo
+participant "KautionRepository"       as KRepo
+participant "AuditService"            as Audit
+
+Theke -> API : POST /ausleihen\n{ inventar_nr, mitglied_id }
+
+API -> Service : ausleihen(inventar_nr, mitglied_id)
+
+Service -> GRepo : findByInventarNr(inventar_nr)
+GRepo --> Service : Gegenstand
+
+Service -> Service : [BR-07] istGesperrt(mitglied_id)\n→ nicht gesperrt
+
+Service -> ARepo : countAktiveAusleihen(mitglied_id)
+ARepo --> Service : Anzahl < 3
+
+Service -> Domain : [BR-05] prüfeZustand(gegenstand)\n→ verfügbar oder für Mitglied reserviert
+
+Service -> Domain : [BR-26] prüfeWartungsfälligkeit(gegenstand)\n→ nicht wartungsfällig
+
+Service -> Domain : [BR-08] prüfeEinweisung(kategorie, mitglied_id)\n→ keine Pflicht oder Einweisung vorhanden
+
+Service -> Domain : [BR-04] berechneKaution(wiederbeschaffungswert)\n→ round(0.20 × wbw, min=5, max=100)
+
+Service -> Domain : [BR-09] erstelleAusleihe(\n  mitglied_id, gegenstand_id,\n  ausgabedatum, fälligkeitsdatum)
+
+Service -> ARepo : save(ausleihe)
+ARepo --> Service : ausleihe (mit ID)
+
+Service -> KRepo : [BR-20] hinterlegen(\n  ausleihe_id, betrag)
+KRepo --> Service : kautionsbuchung
+
+Service -> Audit : [BR-22] logge(\n  typ=KAUTION_HINTERLEGT,\n  ausleihe_id, betrag, zeitstempel)
+
+Service -> GRepo : setzeZustand(gegenstand_id, AUSGELIEHEN)
+
+Service --> API : AusleiheDTO\n{ ausleihe_id, fälligkeitsdatum, kaution }
+
+API --> Theke : HTTP 201 Created\n{ ausleihe_id, fälligkeitsdatum, kaution }
+@enduml
+....
+
+=== Szenario 2: Rückgabe, Prüfprotokoll und Zustandsübergang (UC-03 + UC-04)
+
+Die Rückgabe an der Theke versetzt den Gegenstand in `in_Prüfung` — die Ausleihe bleibt
+offen.
+Erst wenn Rolf das Prüfprotokoll einreicht, wird die Ausleihe abgeschlossen,
+der Nutzungszähler erhöht, der Kautionsrestbetrag freigegeben und der Gegenstand
+in seinen Folge­zustand versetzt.
+Liegt eine offene Vormerkung vor, wird der Gegenstand statt auf `verfügbar`
+direkt auf `reserviert` gesetzt (BR-30).
+
+[plantuml, szenario-02-rueckgabe-pruefprotokoll, svg]
+....
+@startuml
+skinparam sequenceArrowThickness 1.5
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 240
+
+actor       "Thekendienst\n(Karim)"   as Theke
+actor       "Wart\n(Rolf)"            as Wart
+participant "REST-API"                as API
+participant "RückgabeService"         as RService
+participant "PrüfprotokollService"    as PService
+participant "GegenstandRepository"    as GRepo
+participant "AusleiheRepository"      as ARepo
+participant "VormerkungRepository"    as VRepo
+participant "KautionRepository"       as KRepo
+participant "AuditService"            as Audit
+
+== Rückgabe an der Theke ==
+
+Theke -> API : POST /ausleihen/{id}/rueckgabe\n{ auffälligkeiten? }
+API -> RService : rückgabe(ausleihe_id, auffälligkeiten)
+RService -> GRepo : setzeZustand(gegenstand_id, IN_PRÜFUNG)
+RService --> API : HTTP 200 OK
+API --> Theke : Gegenstand in Prüfung
+
+== Tage später: Prüfprotokoll durch den Wart ==
+
+Wart -> API : POST /ausleihen/{id}/pruefprotokoll\n{ nachzustand, kautionsabzug, begründung? }
+API -> PService : erstellePrüfprotokoll(ausleihe_id, dto)
+
+PService -> ARepo : findByIdWithGegenstand(ausleihe_id)
+ARepo --> PService : ausleihe (Zustand IN_PRÜFUNG)
+
+PService -> PService : [BR-21] validiere:\n  kautionsabzug ≤ hinterlegte Kaution
+
+PService -> ARepo : [BR-15] abschließen(ausleihe_id)
+
+PService -> GRepo : [BR-23] erhöheNutzungszähler(gegenstand_id)
+GRepo --> PService : nutzungszähler_neu
+
+PService -> PService : [BR-24] nutzungszähler_neu ≥ wartungsintervall?\n→ effektiver Nachzustand ggf. WARTUNGSFÄLLIG
+
+PService -> KRepo : [BR-20] freigeben(\n  ausleihe_id, betrag - abzug)
+KRepo --> PService : kautionsbuchung
+
+PService -> Audit : [BR-22] logge(\n  typ=KAUTION_FREIGEGEBEN,\n  ausleihe_id, betrag, zeitstempel)
+
+alt effektiver Nachzustand = VERFÜGBAR und offene Vormerkung vorhanden [BR-30]
+    PService -> VRepo : findeErsteVormerkung(kategorie_id)
+    VRepo --> PService : vormerkung (mitglied_id)
+    PService -> GRepo : setzeZustand(gegenstand_id, RESERVIERT)
+    PService -> VRepo : erstelleReservierung(\n  mitglied_id, gegenstand_id,\n  verfall = heute + 3 Tage)
+else effektiver Nachzustand = VERFÜGBAR, keine Vormerkung
+    PService -> GRepo : setzeZustand(gegenstand_id, VERFÜGBAR)
+else effektiver Nachzustand = WARTUNGSFÄLLIG
+    PService -> GRepo : setzeZustand(gegenstand_id, WARTUNGSFÄLLIG)
+else effektiver Nachzustand = AUSGEMUSTERT oder VERLOREN
+    PService -> GRepo : setzeZustand(gegenstand_id, AUSGEMUSTERT)
+end
+
+PService --> API : PrüfprotokollDTO\n{ id, nachzustand, freigabe, zeitstempel }
+API --> Wart : HTTP 201 Created
+@enduml
+....
+
+=== Szenario 3: Reservierungsverfall — Lazy Evaluation (SE-01)
+
+Das System betreibt keinen Scheduler.
+Verfallene Reservierungen werden erkannt und verarbeitet, sobald eine Operation
+den betroffenen Gegenstand oder die betroffene Reservierung berührt.
+Der Check und die auslösende Operation laufen in derselben Transaktion (atomar).
+
+[plantuml, szenario-03-reservierungsverfall, svg]
+....
+@startuml
+skinparam sequenceArrowThickness 1.5
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 220
+
+actor       "Thekendienst\n(Karim)"   as Theke
+participant "REST-API"                as API
+participant "SystemEventService"      as SES
+participant "ReservierungRepository"  as RRes
+participant "VormerkungRepository"    as VRepo
+participant "GegenstandRepository"    as GRepo
+participant "AusleiheService"         as Service
+
+Theke -> API : POST /ausleihen\n{ inventar_nr, mitglied_id }
+
+API -> SES : checkExpiredReservations(today)
+
+SES -> RRes : findeVerfallene(\n  verfall_datum < heute)
+RRes --> SES : [reservierung_A (gegenstand_42, mitglied_17)]
+
+loop für jede verfallene Reservierung
+    SES -> RRes : setzeStatus(reservierung_A, VERFALLEN)
+    SES -> VRepo : nächsteVormerkung(kategorie_id)
+    VRepo --> SES : vormerkung_B (mitglied_23)
+
+    alt mitglied_23 nicht gesperrt
+        SES -> RRes : erstelleReservierung(\n  mitglied_23, gegenstand_42,\n  verfall = heute + 3 Tage)
+        SES -> GRepo : setzeZustand(gegenstand_42, RESERVIERT)
+    else mitglied_23 gesperrt [BR-33]
+        note over SES : Überspringe; Platz bleibt erhalten.\nPrüfe nächste Vormerkung …
+    else keine weitere Vormerkung
+        SES -> GRepo : setzeZustand(gegenstand_42, VERFÜGBAR)
+    end
+end
+
+SES --> API : (Verfall-Check abgeschlossen)
+
+API -> Service : ausleihen(inventar_nr, mitglied_id)
+note right of Service : Eigentlicher Request\nläuft jetzt auf\naktuellen Zuständen
+Service --> API : AusleiheDTO
+API --> Theke : HTTP 201 Created
+@enduml
+....
+
+=== Szenario 4: Automatische Sperre — Computed Property (SE-02)
+
+Die Sperre eines Mitglieds ist kein persistiertes Feld, sondern wird bei jedem
+Zugriff aus den aktiven Ausleihen berechnet.
+Sobald der `SperrPrüfer` eine überfällige Ausleihe findet, bricht das System
+mit `422 MITGLIED_GESPERRT` ab — ohne einen Zustandswechsel zu schreiben.
+
+[plantuml, szenario-04-sperre, svg]
+....
+@startuml
+skinparam sequenceArrowThickness 1.5
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 220
+
+actor       "Thekendienst\n(Karim)"   as Theke
+participant "REST-API"                as API
+participant "AusleiheService"         as Service
+participant "SperrPrüfer"             as Prüfer
+database    "Datenbank"               as DB
+
+Theke -> API : POST /ausleihen\n{ inventar_nr, mitglied_id }
+
+API -> Service : ausleihen(inventar_nr, mitglied_id)
+
+Service -> Prüfer : isGesperrt(mitglied_id, heute)
+
+Prüfer -> DB : SELECT COUNT(*) FROM ausleihen\nWHERE mitglied_id = ?\n  AND status = 'aktiv'\n  AND fälligkeitsdatum < today
+DB --> Prüfer : count = 2
+
+Prüfer --> Service : true  ← Mitglied gesperrt [BR-07]
+
+Service --> API : AusleihException(MITGLIED_GESPERRT)
+
+API --> Theke : HTTP 422 Unprocessable Content\n{ fehler: "MITGLIED_GESPERRT",\n  mitglied_id: "…" }
+@enduml
+....

@@ -1,0 +1,113 @@
+:jbake-title: Glossary
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 12
+:filename: /chapters/12_glossary.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-glossary]]
+== 12. Glossar
+
+Dieses Glossar führt alle fachlichen und architekturellen Begriffe des Systems _Leihgut_ zusammen.
+Die Fachbegriffe entstammen dem PRD und gelten unverändert in Spezifikation, Architektur und Code (Ubiquitous Language).
+Die Architekturbegriffe beschreiben Konstrukte der technischen Umsetzung.
+
+=== 12.1 Fachbegriffe (aus dem PRD)
+
+[cols="1,3", options="header"]
+|===
+|Begriff |Definition
+
+|Ausleihe
+|Vorgang von der Ausgabe eines Gegenstands an ein Mitglied bis zum Abschluss der Prüfung durch den Wart. Eine Ausleihe ist erst nach dem Prüfprotokoll vollständig abgeschlossen.
+
+|Ausgemustert
+|Endzustand eines Gegenstands. Der Gegenstand ist verloren oder irreparabel und kann nicht mehr ausgegeben werden. Kein weiterer Zustandswechsel möglich.
+
+|Einweisung
+|Dokumentierte Unterweisung einer Person für eine bestimmte Kategorie einweisungspflichtiger Geräte. Die Einweisung hängt an der Person (Mitglied), nicht am einzelnen Gegenstand. Ohne Einweisung ist keine Ausleihe einweisungspflichtiger Gegenstände möglich (BR-08).
+
+|Gegenstand
+|Ein einzelnes physisches Exemplar (z. B. ein konkreter Bohrhammer) mit eindeutiger Inventarnummer. Gehört zu genau einer Kategorie.
+
+|Kaution
+|Bei der Ausgabe eines Gegenstands vom Mitglied hinterlegter Geldbetrag. Keine Gebühr; kein Ertrag des Vereins. Wird nach Prüfprotokoll ganz oder teilweise zurückgegeben. Berechnung: 20 % des Wiederbeschaffungswerts, kaufmännisch gerundet, mindestens 5 €, höchstens 100 € (BR-04).
+
+|Kategorie
+|Gruppe gleichartiger Gegenstände (z. B. „Bohrhammer"). Bestimmt die Leihdauer in Tagen, das Wartungsintervall in Ausleihen und die Einweisungspflicht (ja/nein).
+
+|Mitglied
+|Person, die berechtigt ist, Gegenstände auszuleihen. Das System verwaltet keine Mitgliedsstammdaten; Beiträge und Ein-/Austritte liegen außerhalb des Systems.
+
+|Nutzungszähler
+|Zähler je Gegenstand: Zahl der abgeschlossenen Ausleihen seit der letzten Wartung. Erreicht der Zähler das Wartungsintervall der Kategorie, wird der Gegenstand nach der nächsten Prüfung wartungsfällig (BR-23, BR-24).
+
+|Prüfprotokoll
+|Ergebnis einer Prüfung durch den Wart. Enthält: Zeitstempel, Wart-ID, Ausleihe-ID, Gegenstand-ID, Kautionsabzug in ganzen Euro, Nachzustand (verfügbar / wartungsfällig / ausgemustert / verloren) und optionalen Freitext. Schließt die Ausleihe ab und löst den Zustandswechsel des Gegenstands aus (BR-15, BR-18).
+
+|Prüfung
+|Kontrolle des zurückgegebenen Gegenstands durch den Wart. Kann auch ohne körperliche Rückgabe stattfinden (Verloren-Erklärung, BR-19).
+
+|Reservierung
+|Einem bestimmten Mitglied für maximal drei Kalendertage zugeordneter Gegenstand. Entsteht automatisch, wenn ein Gegenstand nach Prüfung verfügbar wird und eine Vormerkung vorliegt (BR-30). Verfällt nach drei Tagen (BR-31).
+
+|Rückgabe
+|Übergabe eines ausgeliehenen Gegenstands an die Theke. Versetzt den Gegenstand in den Zustand „in Prüfung". Beendet die Ausleihe nicht (BR-12).
+
+|Sperre
+|Zustand eines Mitglieds, das mindestens eine überfällige Ausleihe hat. Ein gesperrtes Mitglied kann nicht ausleihen, aber vormerken (BR-34). Die Sperre ist kein persistent gespeicherter Wert, sondern wird dynamisch berechnet.
+
+|Thekendienst
+|Ehrenamtliche Rolle, die Gegenstände ausgibt und zurücknimmt. Entscheidet nicht über Kautionsabzüge. Greift primär über die REST-API zu.
+
+|Vormerkung
+|Platz in der Warteschlange einer Kategorie. Gilt für eine Kategorie, nicht für einen einzelnen Gegenstand. Ein Mitglied darf je Kategorie höchstens eine Vormerkung haben (BR-27, BR-28).
+
+|Wart (Werkstattwart)
+|Rolle, die Gegenstände prüft, wartet und ausmustert. Entscheidet über Kautionsabzüge. Erstellt Prüfprotokolle. Greift über REST-API oder CLI zu.
+
+|Wartungsfällig
+|Zustand eines Gegenstands, dessen Nutzungszähler das Wartungsintervall der Kategorie erreicht hat. Darf nicht ausgegeben und nicht reserviert werden (BR-26). Endet mit der Aktion „Wartung abschließen" durch den Wart (BR-25).
+
+|Wiederbeschaffungswert (WBW)
+|Preis in ganzen Euro für ein gleichwertiges Ersatzgerät. Grundlage der Kautionsberechnung (BR-03, BR-04).
+|===
+
+=== 12.2 Architekturbegriffe
+
+[cols="1,3", options="header"]
+|===
+|Begriff |Definition
+
+|Audit-Log
+|Persistente, unveränderliche Folge von Ereigniseinträgen. Im System _Leihgut_ werden alle Kautionsbewegungen (Hinterlegung, Abzug, Freigabe) und Zustandswechsel von Gegenständen mit Zeitstempel, Auslöser und Referenz-ID protokolliert (BR-22). Ermöglicht die lückenlose Nachvollziehbarkeit (Top-Qualitätsziel 3).
+
+|DateProvider
+|Schnittstelle (Interface / Port), über die das System das aktuelle Datum abruft. Abstraktion der Systemzeit. Ermöglicht den Einsatz eines `TestDateProvider` in Tests, ohne Produktionscode zu ändern (QS-08, PRD-Rahmenbedingung „Zeit").
+
+|DTO (Data Transfer Object)
+|Einfaches Datenobjekt ohne Geschäftslogik, das Daten zwischen Schichten oder über API-Grenzen transportiert. Im System _Leihgut_ werden DTOs für Request- und Response-Objekte der REST-API verwendet, um die Domänenmodelle von der API-Darstellung zu trennen.
+
+|IOSP (Integration Operation Segregation Principle)
+|Entwurfsprinzip: Eine Funktion/Methode darf entweder Logik enthalten (reine Berechnung, Fallunterscheidung) oder Aufrufe an andere Funktionen delegieren — aber nicht beides gleichzeitig. Fördert Testbarkeit und Nachvollziehbarkeit des Kontrollflusses.
+
+|KautionsKalkulator
+|Domänenkomponente (reines Berechnungsobjekt ohne Seiteneffekte), die gemäß BR-04 aus einem Wiederbeschaffungswert die Kaution berechnet. Direkt unit-testbar ohne Infrastruktur-Abhängigkeiten (→ QS-01).
+
+|Port (Hexagonale Architektur)
+|Abstrakte Schnittstelle an der Grenze des Domänenkerns. Primäre Ports nehmen Anfragen von außen entgegen (z. B. REST-Controller, CLI). Sekundäre Ports ermöglichen dem Kern den Zugriff auf Infrastruktur (z. B. Datenbankrepository, `DateProvider`). Die Implementierung eines Ports ist ein Adapter.
+
+|SperrPrüfer
+|Domänenkomponente, die für ein Mitglied berechnet, ob eine Sperre vorliegt (BR-34, BR-35). Liest aktive Ausleihen und vergleicht Rückgabefristen mit dem aktuellen Datum via `DateProvider`. Wird bei jedem Ausgabeversuch aufgerufen.
+
+|SystemEventService
+|Anwendungskomponente (Use-Case-Klasse oder Orchestrierungsschicht), die fachliche Ereignisse (z. B. Prüfprotokoll abschließen, Ausleihe anlegen) koordiniert, den Audit-Log befüllt und Zustandsübergänge auslöst. Hält keine eigene Fachlogik, sondern delegiert an Domänenkomponenten (IOSP).
+
+|TestDateProvider
+|Konkrete Implementierung des `DateProvider`-Ports für Tests. Liefert ein vom Testfall fest eingestelltes Datum, unabhängig von der Systemuhr. Ermöglicht die deterministische Prüfung von Frist- und Sperrenlogik (QS-08).
+|===

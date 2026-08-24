@@ -1,0 +1,95 @@
+:jbake-title: Introduction and Goals
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 1
+:filename: /chapters/01_introduction_and_goals.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-introduction-and-goals]]
+== Einleitung und Ziele
+
+_Leihgut_ ist eine Verwaltungssoftware für den Werkzeugverleih eines Vereins nach dem Modell der „Bibliothek der Dinge".
+Der Verein betreibt rund 400 Gegenstände (Bohrhammer, Beamer, Lastenrad, Kettensäge, Nähmaschine u. a.) und hat ca. 800 Mitglieder.
+Geöffnet wird dienstags und samstags.
+
+Bisher lief der Betrieb über ein Ringbuch und Bargeld-Kautionen.
+Die Folge: Kautionen wurden falsch ausgezahlt, Wartungstermine wurden übersehen, und Vormerkungen wurden durch spontane Verlängerungen wertlos.
+_Leihgut_ ersetzt das Ringbuch durch ein digitales System, das genau diese drei Fehlerquellen beseitigt.
+
+=== Anforderungsüberblick
+
+Die zentralen fachlichen Ziele lauten:
+
+. *Ausgabesicherheit* — Die Theke erkennt sofort, ob ein Gegenstand herausgegeben werden darf (Zustand, Mitgliedsperre, Ausleihlimit, Einweisungspflicht).
+. *Kautionskorrektheit* — Jede Kautionsbewegung (Hinterlegung, Abzug, Freigabe) ist nachvollziehbar; der Kautionssaldo stimmt cent-genau.
+. *Wartungssicherheit* — Wartungsfällige Gegenstände werden nicht ausgegeben, auch wenn sie physisch unbeschädigt aussehen.
+. *Vormerkungstreue* — Eine Vormerkung sichert den Platz in der Warteschlange; eine ungerechtfertigte Verlängerung durch den aktuellen Ausleiher ist technisch ausgeschlossen.
+
+Was das System ausdrücklich *nicht* leistet:
+
+* Keine Kassenführung (Bargeldfluss bleibt Vereinssache).
+* Keine Mitgliederverwaltung (Beiträge, Ein- und Austritte).
+* Keine Benachrichtigungen, kein Mailversand.
+* Keine Web-Oberfläche.
+
+=== Qualitätsziele
+
+Die folgenden vier Qualitätsziele sind verbindlich und durch automatisierte Tests nachzuweisen.
+Sie sind in absteigender Priorität geordnet.
+
+[cols="1,1,3,2", options="header"]
+|===
+|Prio |Qualitätsziel |Szenario |Messbare Response
+
+|1
+|Sicherheit
+|Ein Mitglied ohne Einweisung versucht über jede verfügbare Schnittstelle (REST-API, CLI), ein einweisungspflichtiges Gerät auszuleihen.
+|Kein Aufruf führt zur Ausgabe. Nachgewiesen durch je einen automatisierten Test pro Schnittstelle.
+
+|2
+|Korrektheit der Kaution
+|Für ein Mitglied mit 50 abgeschlossenen Ausleihen wird der Kautionssaldo aus den Kautionsbewegungen nachgerechnet.
+|Abweichung: 0 Cent.
+
+|3
+|Nachvollziehbarkeit
+|Der Wart schließt eine Prüfung mit Kautionsabzug ab.
+|Der Vorgang erzeugt einen Audit-Eintrag mit Zeitstempel, Betrag in ganzen Euro, Auslöser (Prüfprotokoll-ID) und Verweis auf die Ausleihe-ID.
+
+|4
+|Antwortzeit
+|Die Theke prüft die Ausgabefähigkeit eines Gegenstands bei 400 Gegenständen und 800 Mitgliedern im Datenbestand.
+|Antwortzeit unter 300 ms, gemessen am 95. Perzentil über 100 aufeinanderfolgende Aufrufe.
+|===
+
+*Nicht-Ziel: Verfügbarkeit.* +
+Der Verein öffnet zweimal pro Woche.
+Ein Systemausfall zwischen den Öffnungszeiten ist folgenlos und wird nicht als Qualitätsziel behandelt.
+
+=== Stakeholder
+
+[cols="1,2,3", options="header"]
+|===
+|Rolle |Persona |Erwartungen an das System
+
+|Thekendienst
+|Karim — ehrenamtlich, alle zwei Wochen samstags drei Stunden, wechselnde Besetzung
+|In 30 Sekunden wissen, ob ein Gegenstand ausgegeben werden darf. Kaution nicht im Kopf ausrechnen müssen. Fehlertolerante, knappe API-Antworten.
+
+|Mitglied
+|Sabine — renoviert regelmäßig, leiht häufig
+|Vorab sehen, ob ein Gegenstand verfügbar ist. Vormerkung online abgeben können. Sicher sein, dass die Reservierung eingehalten wird.
+
+|Wart
+|Rolf — prüft, repariert, mustert aus; sieht Geräte oft erst Tage nach der Rückgabe
+|Prüfprotokolle erstellen und Kautionsabzüge festlegen. Wartungsfällige Gegenstände verwalten. CLI als Alternative zur REST-API.
+
+|Vereinsvorstand
+|(keine Persona)
+|Null ungeklärte Kautionsdifferenzen pro Quartal. Keine Ausgaben trotz Wartungsfälligkeit oder fehlender Einweisung. Keine IT-Infrastruktur-Kosten (lokal betrieben).
+|===

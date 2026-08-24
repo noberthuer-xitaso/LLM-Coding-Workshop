@@ -1,0 +1,414 @@
+:jbake-title: Querschnittskonzepte
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 8
+:filename: /chapters/08_concepts.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+[[section-concepts]]
+== 8. Querschnittskonzepte
+
+Dieses Kapitel beschreibt Konzepte, die mehrere Bausteine des Systems *Leihgut* betreffen und deshalb nicht einem einzelnen Baustein zugeordnet werden.
+Der Verein "Bibliothek der Dinge" betreibt das System lokal, ehrenamtlich und ohne externe Dienste.
+Das prägt alle fünf Konzepte: Vertrauensbasis unter Mitgliedern, kein Login-System, keine externen Abhängigkeiten.
+
+---
+
+=== 8.1 Bedrohungsmodell (STRIDE)
+
+Das System verarbeitet Kautionsbewegungen und steuert den Zugang zu Leihgegenständen.
+Eine STRIDE-Analyse macht explizit, welche Bedrohungen existieren, wie hoch ihr Risiko ist und welche davon bewusst akzeptiert werden.
+
+==== Systemkontext und Risikorahmen
+
+Leihgut ist ein *lokales Vereinssystem* ohne Internetanbindung.
+Alle Nutzer (Thekendienst, Wart, Mitglieder) gehören demselben Verein an.
+Angriffe von außen sind im Scope von Release 1 nicht modelliert.
+Das Risikoprofil orientiert sich an dieser Vertrauensbasis.
+
+Risikobewertung: `Wahrscheinlichkeit × Impact` → `Low / Medium / High`
+
+[cols="1,1,4,2,2,2", options="header"]
+|===
+|T-ID |Kategorie |Beschreibung |Wahrscheinlichkeit |Impact |Gesamtrisiko
+
+|T-001
+|Spoofing
+|Der `X-Role`-Header wird vom System nicht geprüft.
+Jeder Aufrufer kann eine beliebige Rolle (`theke`, `wart`, `mitglied`) behaupten.
+Schutz existiert nur durch soziale Norm.
+|Low (Verein, bekannte Personen)
+|Medium (Rollen steuern Schreibzugriffe)
+|*Low*
+
+|T-002
+|Tampering
+|Kautionsbewegungen sind als reguläre Datenbankzeilen mutierbar (UPDATE/DELETE durch direkten DB-Zugriff).
+Das Audit-Log ist nicht kryptografisch gesichert; ein DB-Zugriff kann Einträge löschen oder verändern.
+|Low (physischer DB-Zugriff nötig)
+|High (finanziell relevante Daten)
+|*Medium*
+
+|T-003
+|Repudiation
+|Da keine Authentifizierung existiert, lässt sich nicht beweisen, wer eine Aktion ausgeführt hat.
+Ein Thekenmitarbeiter kann abstreiten, eine Ausleihe angelegt zu haben.
+|Medium (Rollheader leicht fälschbar)
+|Medium (Streit um Kautionen, Ausleihen)
+|*Medium*
+
+|T-004
+|Information Disclosure
+|Alle Ausleihen und Kautionssalden sind über die REST-API ohne Zugriffsschutz lesbar.
+Jedes Mitglied kann die Kautionsdaten aller anderen Mitglieder abfragen.
+|Medium (API lokal erreichbar)
+|Medium (Finanzdaten, Nutzungsverhalten)
+|*Medium*
+
+|T-005
+|Denial of Service
+|Die API hat kein Rate-Limiting.
+Ein Aufrufer kann die Datenbank durch Massenanfragen belasten.
+|Low (lokales Netz, Vereinskontext)
+|Low (kein SLA, kein Dauerbetrieb)
+|*Low*
+
+|T-006
+|Elevation of Privilege
+|Ein Mitglied kann Wart-Endpunkte aufrufen, indem es den Header `X-Role: wart` setzt.
+Damit kann es Prüfprotokolle anlegen, Kautionen abziehen und Gegenstände ausmustern.
+|Low (technisches Wissen nötig)
+|High (vollständiger Funktionszugang)
+|*Medium*
+
+|===
+
+---
+
+=== 8.2 Sicherheit
+
+Dieses Kapitel dokumentiert für jede Bedrohung aus 8.1 entweder eine Mitigation oder eine bewusste Akzeptanzentscheidung.
+Beide Kategorien sind produktionsreif — eine akzeptierte Bedrohung ist eine dokumentierte Entscheidung, keine Lücke.
+
+==== Akzeptierte Risiken
+
+[cols="1,1,4", options="header"]
+|===
+|T-ID |Bedrohung |Begründung der Akzeptanz
+
+|T-001
+|Spoofing
+|Der Verein vertraut seinen Mitgliedern.
+Ein Login-System ist ausdrücklich nicht im Scope von Release 1 (PRD: Rahmenbedingungen — Authentifizierung).
+Die Rollen sind informativ und vereinfachen den Ablauf an der Theke; sie sind kein Sicherheitsmechanismus.
+
+|T-006
+|Elevation of Privilege
+|Gleiche Begründung wie T-001.
+Rollen werden über `X-Role`-Header mitgegeben und nicht geprüft.
+Da alle Nutzer Vereinsmitglieder sind, ist ein gezielter Angriff auf Eskalation unwahrscheinlich.
+Bei Missbrauch greift die soziale Kontrolle im Verein.
+
+|===
+
+==== Implementierte Mitigationen
+
+[cols="1,1,4", options="header"]
+|===
+|T-ID (geschlossen) |Mitigation |Beschreibung
+
+|T-002 (teilweise), T-003
+|Append-only Audit-Log (BR-22)
+|Jede Kautionsbewegung — Hinterlegung, Abzug, Freigabe — erzeugt einen unveränderlichen Eintrag
+in einer dedizierten Audit-Tabelle (Zeitstempel, Betrag, Auslöser).
+Die Tabelle ist durch Anwendungslogik schreibgeschützt: INSERT only, kein UPDATE, kein DELETE über die API.
+Dies erschwert nachträgliche Manipulation (T-002) und schafft einen nachvollziehbaren Aktionspfad (T-003).
+Das Log ist nicht kryptografisch gesichert; direkter DB-Zugriff bleibt ein Restrisiko (T-002 nur teilweise geschlossen).
+
+|T-002 (finanziell)
+|Abzugsobergrenze (BR-21)
+|Ein Kautionsabzug ist auf die hinterlegte Kaution begrenzt.
+Die Geschäftslogik erzwingt diese Invariante; ein Domänenfehler wird ausgelöst, wenn der Abzug die Kaution übersteigt.
+Damit kann über die API keine negative Kautionsbilanz entstehen.
+
+|T-002 (Zustand)
+|Expliziter Nachzustand (BR-18)
+|Der Nachzustand eines Gegenstands nach der Prüfung wird explizit gesetzt, nicht aus anderen Feldern abgeleitet.
+Implizite Zustandsänderungen durch Datenbankmanipulation einzelner Felder ändern den Gegenstandszustand nicht automatisch.
+
+|T-004
+|Dokumentiertes Restrisiko
+|Kein technischer Zugriffsschutz auf Leseendpunkte in Release 1.
+Das Risiko ist dokumentiert.
+Eine zukünftige Version kann HTTP Basic Auth oder API-Keys ergänzen, ohne die Geschäftslogik zu ändern.
+
+|T-005
+|Dokumentiertes Restrisiko
+|Kein Rate-Limiting in Release 1.
+Das System läuft lokal mit maximal einigen Dutzend gleichzeitigen Nutzern; ein DoS-Angriff ist im Vereinskontext unrealistisch.
+
+|===
+
+---
+
+=== 8.3 Testkonzept
+
+Das Testkonzept folgt der Testpyramide.
+Jeder Test referenziert seine UC-ID und BR-IDs — entweder im Testnamen (`test_br04_kautionsberechnung_minimum`) oder über eine `@Tag`-Annotation (`@Tag("BR-04")`).
+Alle Gherkin-Szenarien aus den Use-Case-Spezifikationen müssen durch automatisierte Tests abgedeckt sein (BR-Traceability, Definition of Done).
+
+==== Testpyramide
+
+[cols="1,2,3", options="header"]
+|===
+|Ebene |Scope |Beispiele
+
+|*Unit-Tests*
+|Domain-Services, Value-Objects; kein Framework, kein I/O
+a|
+* `KautionsKalkulator` — alle Wertebereich-Varianten (BR-04, siehe Wertetabelle in supplementary-validation-rules.adoc)
+* `SperrPrüfer` — Überfälligkeitsberechnung (BR-34, BR-35, BR-36)
+* Zustandsübergänge des Gegenstands — alle erlaubten und alle unerlaubten Übergänge
+* `RückgabefristRechner` — Ausgabe-, Verlängerungs- und Überfälligkeitslogik (BR-09, BR-10, BR-11, BR-35)
+* `ReservierungsVerfall` — Verfallsdatum-Berechnung (BR-31)
+
+|*Integrations-Tests*
+|Repository-Implementierungen gegen echte (Test-)Datenbank
+a|
+* Persistenz und Wiederherstellung aller Aggregate (Gegenstand, Ausleihe, Mitglied, Prüfprotokoll)
+* Transaktionsverhalten: Kautionsbewegung und Zustandsänderung in einer Transaktion (BR-22)
+* Rollback bei Fehler: kein Teilzustand nach fehlgeschlagener Transaktion
+* Append-only-Invariante des Audit-Logs: UPDATE und DELETE werden zurückgewiesen
+
+|*Service-Tests (API)*
+|Alle REST-Endpunkte gegen laufenden Service ohne Mocks
+a|
+* Jeder Use-Case-Endpunkt mit Erfolgs- und Fehlerpfad
+* Ausgabebedingungen (BR-05 bis BR-08): je ein negativer Test pro Bedingung
+* Kautionsabzug-Obergrenze (BR-21): Abzug > Kaution → 422
+* Verlängerungsausschluss bei Vormerkung und Überfälligkeit (BR-11)
+* Reservierungsverfall-Trigger über `TestDateProvider`
+* Einweisung fehlt → Ausgabe abgelehnt (Qualitätsziel Sicherheit)
+
+|===
+
+==== Testbarkeit der Zeit
+
+Das System liest das aktuelle Datum über ein `DateProvider`-Interface.
+Die Produktivimplementierung liest `LocalDate.now()`.
+Tests injizieren einen `TestDateProvider` mit festem Datum.
+
+[source]
+----
+interface DateProvider {
+    fun today(): LocalDate
+}
+
+class TestDateProvider(private val fixedDate: LocalDate) : DateProvider {
+    override fun today() = fixedDate
+}
+----
+
+Dieses Muster ist zwingend für Regressionstests zu:
+
+* Überfälligkeitsprüfung (BR-35) — Datum genau auf der Grenze
+* Reservierungsverfall (BR-31) — Tag 3 vs. Tag 4 nach Entstehung
+* Sperreintritt und Sperreende (BR-34, BR-36)
+
+==== Invarianten-Tests (Property-Based)
+
+[cols="1,2,2", options="header"]
+|===
+|Invariante |Wertebereich |Referenz
+
+|Kautionsberechnung
+|WBW 1–10 000 €; Kaution immer ∈ [5, 100]; Monotonie (höherer WBW → gleiche oder höhere Kaution bis zum Maximum)
+|BR-04
+
+|Nutzungszähler-Monotonie
+|Zähler steigt nach jeder abgeschlossenen Ausleihe um genau 1; er sinkt nie (außer nach expliziter Wartungsabschluss-Aktion)
+|BR-23, BR-25
+
+|Zustandsautomat
+|Alle 10 erlaubten Übergänge sind erreichbar; alle unerlaubten Übergänge lösen einen Domänenfehler aus; kein Zustand ist eine Sackgasse außer `ausgemustert`
+|PRD Zustandsautomat
+
+|Kautionssaldo
+|Saldo = Summe(Hinterlegungen) − Summe(Abzüge) − Summe(Freigaben) ≥ 0 für jede Ausleihe
+|BR-20, BR-21, BR-22
+
+|===
+
+---
+
+=== 8.4 Observability
+
+Das System läuft als einzelner Prozess ohne externe Monitoring-Infrastruktur.
+Observability wird durch drei Mechanismen sichergestellt: strukturiertes Logging, optionale Metriken und einen expliziten Audit-Trail.
+
+==== Logging
+
+*Format:* Strukturiertes JSON auf `stdout`.
+Jede Zeile ist ein eigenständiges JSON-Objekt; kein mehrzeiliges Format.
+
+*Log-Level:*
+
+[horizontal]
+ERROR:: Unerwarteter Systemfehler (5xx); vollständiger Stack-Trace im Feld `error`.
+WARN:: Erwarteter Fehler mit Handlungsbedarf (z. B. Dateninkonsistenz, die nicht zum 4xx führt).
+INFO:: Normalerweise pro Business-Vorgang ein Eintrag.
+DEBUG:: Interne Zustandsdetails; in Produktion deaktiviert.
+
+*Pflichteinträge (INFO):*
+
+[cols="1,3", options="header"]
+|===
+|Ereignis |Pflichtfelder im Log-Eintrag
+
+|Zustandsübergang eines Gegenstands
+|`gegenstand_id`, `alter_zustand`, `neuer_zustand`, `uc_id`, `timestamp`
+
+|Kautionsbewegung
+|`ausleihe_id`, `bewegungstyp` (hinterlegung \| abzug \| freigabe), `betrag_euro`, `ausloeser_id`, `timestamp`
+(redundant zum Audit-Log — ermöglicht Log-basierte Rekonstruktion ohne DB-Zugriff)
+
+|API-Request
+|`method`, `path`, `status_code`, `dauer_ms`, `timestamp`
+
+|===
+
+==== Metriken (optional)
+
+Die folgenden Metriken können ohne Architekturänderung ergänzt werden (z. B. via Micrometer/Prometheus):
+
+[cols="1,1,2", options="header"]
+|===
+|Name |Typ |Beschreibung
+
+|`ausleihen_gesamt`
+|Counter
+|Anzahl aller jemals gestarteten Ausleihen (Ausgaben)
+
+|`ausleihen_aktiv`
+|Gauge
+|Anzahl laufender Ausleihen (Zustand `ausgeliehen` oder `in Prüfung`)
+
+|`kautionsvolumen_hinterlegt_euro`
+|Gauge
+|Summe aller aktuell hinterlegten Kautionen in Euro
+
+|===
+
+==== Audit-Trail
+
+Kautionsbewegungen werden als append-only Tabelle in der Datenbank persistiert (BR-22).
+
+* Jede Zeile enthält: `id`, `timestamp`, `ausleihe_id`, `bewegungstyp`, `betrag_euro`, `ausloeser_id`.
+* Die Tabelle ist über die API abfragbar: `GET /audit` (gefiltert nach `ausleihe_id` oder Zeitraum).
+* INSERT ist die einzige erlaubte Operation; UPDATE und DELETE werden durch Anwendungslogik verhindert.
+* Der Audit-Trail ist die verbindliche Quelle für Kautionssalden und Streitfälle.
+
+==== Health-Endpoint
+
+`GET /health` antwortet mit `200 OK` und `{ "status": "ok" }`, wenn die Datenbankverbindung erfolgreich ist.
+Bei Datenbankfehler: `503 Service Unavailable` mit `{ "status": "degraded", "detail": "db unreachable" }`.
+
+---
+
+=== 8.5 Fehlerbehandlung
+
+==== Fehlerklassifikation
+
+[cols="1,1,3,2", options="header"]
+|===
+|Klasse |HTTP-Status |Bedeutung |Beispiele
+
+|Domänenfehler
+|4xx
+|Erwartet; durch den Aufrufer behebbar.
+Die Geschäftsregel oder Validierung wurde verletzt.
+|404 Gegenstand nicht gefunden; 409 Ausleihlimit (BR-06); 422 Kautionsabzug zu hoch (BR-21); 422 fehlende Einweisung (BR-08)
+
+|Systemfehler
+|5xx
+|Unerwartet; Programmierfehler oder Infrastrukturproblem.
+Kein Stack-Trace im Response-Body (nur im Log).
+|500 Datenbankfehler; 500 unbehandelter Zustandsübergang
+
+|===
+
+==== API-Fehlerformat
+
+Alle Fehlerantworten haben dasselbe JSON-Format:
+
+[source,json]
+----
+{
+  "fehler_code": "AUSLEIHLIMIT_ERREICHT",
+  "beschreibung": "Das Mitglied führt bereits 3 aktive Ausleihen.",
+  "details": {
+    "mitglied_id": "M-042",
+    "aktive_ausleihen": 3
+  }
+}
+----
+
+* `fehler_code`: stabiler String-Bezeichner, maschinenlesbar, im Interface-Contract definiert.
+* `beschreibung`: menschenlesbare Erklärung auf Deutsch.
+* `details`: optionales Objekt mit kontextspezifischen Feldern; kann leer sein (`{}`).
+
+Bekannte Fehlercodes (nicht erschöpfend):
+
+[cols="1,1,2", options="header"]
+|===
+|Code |Status |Auslösende Regel
+
+|`GEGENSTAND_NICHT_VERFUEGBAR`        |409 |BR-05
+|`AUSLEIHLIMIT_ERREICHT`              |409 |BR-06
+|`MITGLIED_GESPERRT`                  |409 |BR-07
+|`EINWEISUNG_FEHLT`                   |422 |BR-08
+|`VERLAENGERUNG_NICHT_MOEGLICH`       |409 |BR-11
+|`KAUTIONSABZUG_ZU_HOCH`             |422 |BR-21
+|`UNGUELTIGER_ZUSTANDSUEBERGANG`      |422 |Zustandsautomat
+|`GEGENSTAND_NICHT_GEFUNDEN`          |404 |—
+|`AUSLEIHE_NICHT_GEFUNDEN`            |404 |—
+|`MITGLIED_NICHT_GEFUNDEN`            |404 |—
+
+|===
+
+==== Transaktionen
+
+Jede schreibende Operation ist atomar.
+Das ist besonders kritisch für Operationen, die mehrere Tabellen betreffen:
+
+[cols="1,2", options="header"]
+|===
+|Operation |Atomare Einheit
+
+|Ausgabe (Ausleihe anlegen)
+|Gegenstandszustand → `ausgeliehen` + Audit-Eintrag Hinterlegung (BR-09, BR-22)
+
+|Prüfprotokoll abschließen
+|Gegenstandszustand → Nachzustand + Nutzungszähler +1 + Audit-Eintrag Abzug/Freigabe (BR-15, BR-22, BR-23)
+
+|Reservierung verfallen lassen
+|Gegenstandszustand → `verfügbar` oder `reserviert` (nächstes Mitglied) + ggf. neue Reservierung anlegen (BR-31)
+
+|===
+
+Bei Fehler innerhalb einer Transaktion wird vollständig zurückgerollt.
+Nach dem Rollback ist der Systemzustand konsistent und entspricht dem letzten committed State.
+
+==== Kein Retry, kein Circuit Breaker
+
+Das System hat keine externen Abhängigkeiten (kein Mailserver, keine Zahlungsanbindung, keine Cloud-Services).
+Retry-Logik und Circuit Breaker sind deshalb nicht implementiert.
+
+==== Recovery
+
+Bei einem Neustart des Prozesses ist der letzte committed Datenbankzustand der korrekte und vollständige Systemzustand.
+Keine manuelle Recovery-Prozedur ist nötig.
+In-Memory-Caches (falls vorhanden) werden beim Start aus der Datenbank befüllt.

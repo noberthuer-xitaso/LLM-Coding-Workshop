@@ -1,0 +1,132 @@
+:jbake-title: Solution Strategy
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 4
+:filename: /chapters/04_solution_strategy.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-solution-strategy]]
+== Lösungsstrategie
+
+Dieser Abschnitt beschreibt die grundlegenden Architekturentscheidungen, die den gesamten Entwurf von _Leihgut_ prägen.
+Jede Entscheidung ist mit dem Qualitätsziel oder der Randbedingung verknüpft, die sie adressiert.
+
+=== Überblick
+
+[cols="2,3,2", options="header"]
+|===
+|Entscheidung |Kurzbegründung |Adressiertes Ziel / Randbedingung
+
+|Domain-Driven Design mit Ubiquitous Language
+|Alle Bezeichner im Code stammen direkt aus dem Glossar des PRD; keine Übersetzung in technische Synonyme.
+|OC-03; Korrektheit der Kaution (QZ-2)
+
+|Layered Architecture (API → Application → Domain → Infrastructure)
+|Domänenregeln sind von Transport und Persistenz entkoppelt; Geschäftsregeln lassen sich isoliert testen.
+|Sicherheit (QZ-1); Nachvollziehbarkeit (QZ-3)
+
+|IOSP — Integration Operation Segregation Principle
+|Jede Funktion ist entweder Orchestrierung (ruft andere Funktionen auf) oder Logik (rechnet, entscheidet) — nie beides.
+|Testbarkeit; Sicherheit (QZ-1)
+
+|Lazy Evaluation für zeitabhängige Zustände
+|Reservierungsverfall und Mitgliedssperre werden bei jedem Lesezugriff neu bewertet, kein Scheduler, kein Hintergrundprozess.
+|TC-05 (Einzelprozess); TC-07 (testbare Datumsquelle)
+
+|Expliziter Nachzustand im Prüfprotokoll
+|`nachzustand` wird als eigenständiges Feld gesetzt, nicht aus Zählern oder anderen Feldern abgeleitet.
+|Nachvollziehbarkeit (QZ-3); BR-18
+
+|Audit-Log append-only
+|Kautionsbewegungen und Zustandsübergänge werden als unveränderliche Einträge geschrieben; kein Update, kein Delete.
+|Korrektheit der Kaution (QZ-2); Nachvollziehbarkeit (QZ-3)
+
+|Testbare Datumsquelle (Strategy Pattern / Dependency Injection)
+|Das aktuelle Datum wird über eine injizierbare Schnittstelle geliefert; Tests übergeben einen Fixwert.
+|TC-07; Korrektheit der Kaution (QZ-2)
+|===
+
+=== Domain-Driven Design und Ubiquitous Language
+
+Alle Domänenobjekte (`Gegenstand`, `Ausleihe`, `Pruefprotokoll`, `Kautionsbewegung`, `Vormerkung`, `Reservierung`) tragen die deutschen Bezeichner aus dem Glossar des PRD — in Klassennamen, Feldnamen, API-Pfaden und Testbeschreibungen.
+Englische Übersetzungen sind unzulässig.
+
+Damit kann der Wart Rolf, der das System nicht programmiert, eine Testbeschreibung lesen und sofort erkennen, welche Geschäftsregel geprüft wird.
+Dieses Prinzip reduziert die Fehleranfälligkeit bei Änderungen an Geschäftsregeln, weil kein mentales Mapping zwischen Fachbegriff und Codebegriff stattfindet.
+
+=== Geschichtete Architektur
+
+Das System ist in vier Schichten aufgeteilt:
+
+[cols="1,3", options="header"]
+|===
+|Schicht |Verantwortung
+
+|*API-Schicht*
+|HTTP-Routing, Deserialisierung von JSON-Requests, Serialisierung von JSON-Responses, Rollenweiterleitung, HTTP-Statuscodes. Keine Geschäftslogik.
+
+|*Application-Schicht*
+|Anwendungsfälle (Use Cases) orchestrieren. Koordiniert Domain-Objekte und Infrastructure-Ports. Enthält keine Berechnungslogik; ruft ausschließlich Domain- und Infrastructure-Methoden auf. (IOSP: reine Integration)
+
+|*Domain-Schicht*
+|Geschäftsregeln, Zustandsautomaten, Kautionsberechnung, Überfälligkeitsprüfung, Reservierungsverfall. Keine Abhängigkeit zu Persistenz oder Transport. (IOSP: reine Logik)
+
+|*Infrastructure-Schicht*
+|Persistenz (Datenbankzugriff oder Datei-I/O), Datumsquelle (Strategy), CLI-Adapter. Implementiert die Ports, die die Domain-Schicht definiert.
+|===
+
+Der Abhängigkeitspfeil zeigt immer nach innen: API → Application → Domain ← Infrastructure.
+Die Domain-Schicht definiert Interfaces (Ports), die die Infrastructure-Schicht implementiert (Adapters).
+Dieses Muster (Ports & Adapters / Hexagonal Architecture) ermöglicht den Austausch der Persistenzstrategie ohne Änderung an der Domänenlogik.
+
+=== IOSP — Integration Operation Segregation Principle
+
+Jede Funktion / Methode gehört ausschließlich einer der beiden Kategorien an:
+
+Integration (Orchestrierung):: Ruft andere Funktionen auf; enthält keine `if`-Verzweigungen oder Berechnungen. Typisch: Use-Case-Handler in der Application-Schicht.
+Operation (Logik):: Berechnet ein Ergebnis oder trifft eine Entscheidung; ruft keine anderen Funktionen auf. Typisch: Validierungsregeln in der Domain-Schicht.
+
+Dieses Prinzip erzwingt eine klare Trennung zwischen „Was passiert als Nächstes?" (Application) und „Ist diese Aktion erlaubt?" (Domain).
+Es macht beide Arten von Einheiten ohne Mocks testbar: Operationen durch direkte Eingabe/Ausgabe, Integrationen durch Überprüfung der Aufrufsequenz.
+
+=== Lazy Evaluation für zeitabhängige Zustände
+
+Die Mitgliedssperre (BR-34/BR-35) und der Reservierungsverfall (BR-31) werden nicht durch einen Hintergrundprozess oder Scheduler gepflegt.
+Stattdessen wird der Zustand bei jedem Lesezugriff auf Basis des aktuellen Datums frisch bewertet:
+
+* *Sperre*: Beim Aufruf „Ausgabe prüfen" wird live geprüft, ob eine aktive Ausleihe des Mitglieds überfällig ist (`rueckgabefrist < heute AND rueckgabe_datum IS NULL`).
+* *Reservierungsverfall*: Beim Aufruf „Ausgabe" oder „Reservierung abfragen" wird geprüft, ob `verfall_datum < heute`. Verfallene Reservierungen werden erst in diesem Moment deaktiviert und ggf. an die nächste Vormerkung weitergereicht.
+
+Damit wird die Anforderung TC-05 (Einzelprozess, keine externen Dienste) ohne Kompromisse bei der fachlichen Korrektheit erfüllt.
+Die injizierbare Datumsquelle (TC-07) macht dieses Verhalten deterministisch testbar.
+
+=== Expliziter Nachzustand im Prüfprotokoll
+
+Der `nachzustand` eines Prüfprotokolls (`verfügbar` | `wartungsfällig` | `ausgemustert` | `verloren`) wird vom Wart explizit gesetzt.
+Das System leitet ihn nicht aus dem Nutzungszähler oder anderen Feldern ab.
+
+Begründung: Der Wart trägt die fachliche Verantwortung für die Entscheidung. Das System darf ihm diese Entscheidung nicht wegnehmen — auch dann nicht, wenn der Nutzungszähler das Wartungsintervall gerade erst erreicht hat und der Wart ein abweichendes Urteil fällt. (BR-18, BR-14)
+
+=== Audit-Log append-only
+
+Kautionsbewegungen (`Kautionsbewegung`) werden als unveränderliche Sätze angelegt.
+Es gibt keine Update- oder Delete-Operationen auf diesen Sätzen.
+Dasselbe gilt für Prüfprotokolle.
+
+Der Kautionssaldo eines Mitglieds ergibt sich jederzeit reproduzierbar aus `SUM(hinterlegung) - SUM(abzug) - SUM(freigabe)` über alle Kautionsbewegungen seiner Ausleihen.
+Die Invariante INV-18 (`hinterlegung - abzug - freigabe = 0` für abgeschlossene Ausleihen) ist damit durch einen einzelnen SQL-Ausdruck oder eine Schleife nachprüfbar — ohne Systemkenntnis.
+
+=== Testbare Datumsquelle
+
+Das aktuelle Datum wird systemweit über eine injizierbare Schnittstelle (z. B. Interface `DatumsQuelle` mit Methode `heute(): Date`) bezogen.
+Im Produktionsbetrieb implementiert eine Systemuhr-Adapter diese Schnittstelle.
+In Tests wird ein konfigurierbarer Fixwert-Adapter injiziert.
+
+Diese Entscheidung ist Voraussetzung für alle fristbezogenen Tests:
+Überfälligkeitsprüfung, Reservierungsverfall, Verlängerungsausschluss bei Überfälligkeit.
+Ohne sie wären diese Tests zeitabhängig und damit nicht deterministisch wiederholbar.

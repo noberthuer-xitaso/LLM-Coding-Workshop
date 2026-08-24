@@ -1,0 +1,161 @@
+:jbake-title: Deployment View
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 7
+:filename: /chapters/07_deployment_view.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-deployment-view]]
+== 7. Verteilungssicht
+
+=== Übersicht
+
+Das System Leihgut läuft als **einzelner Prozess** auf einem lokalen Rechner
+im Vereinsraum.
+Es benötigt keine Netzwerkinfrastruktur, keine Cloud-Dienste und keine
+Datenbank­server.
+Alle Daten liegen in einer einzigen SQLite-Datei auf dem lokalen Dateisystem.
+
+Startbefehl:
+
+[source,shell]
+----
+leihgut serve --port 8080
+----
+
+=== Deployment-Diagramm
+
+[plantuml, deployment-diagram, svg]
+....
+@startuml
+!include <C4/C4_Deployment.puml>
+
+LAYOUT_WITH_LEGEND()
+
+title Leihgut — Verteilungssicht
+
+Deployment_Node(vereinsrechner, "Vereinsrechner", "Linux / macOS / Windows\nlokaler Rechner im Vereinsraum") {
+
+    Deployment_Node(jvm, "Leihgut-Prozess", "JVM oder natives Executable\nPort 8080") {
+        Container(api, "REST-API-Server", "HTTP/JSON", "Verarbeitet alle fachlichen Anfragen.\nPrüft Geschäftsregeln, steuert Domain und Persistenz.")
+    }
+
+    Deployment_Node(cli_node, "CLI", "Separates Executable im Terminal") {
+        Container(cli, "leihgut CLI", "Shell-Kommando", "Wart-Operationen:\nPrüfprotokoll, Wartungsabschluss, Ausmusterung.\nRuft die REST-API auf localhost:8080 auf.")
+    }
+
+    Deployment_Node(fs, "Lokales Dateisystem", "Verzeichnis ./data/ oder konfigurierbar") {
+        ContainerDb(db, "leihgut.db", "SQLite-Datei", "Persistiert Gegenstände, Ausleihen,\nKautionen, Audit-Log, Vormerkungen.")
+    }
+}
+
+Person(theke, "Thekendienst (Karim)", "Nutzt Browser oder HTTP-Client\ngegen localhost:8080")
+Person(wart, "Wart (Rolf)", "Nutzt CLI im Terminal\noder HTTP-Client")
+Person(mitglied, "Mitglied (Sabine)", "Nutzt Browser oder HTTP-Client\ngegen localhost:8080")
+
+Rel(theke, api, "HTTP/JSON", "GET /gegenstände, POST /ausleihen, …")
+Rel(mitglied, api, "HTTP/JSON", "GET /gegenstände, POST /vormerkungen, …")
+Rel(wart, cli, "Terminal", "leihgut pruefprotokoll …\nleihgut wartung abschliessen …")
+Rel(cli, api, "HTTP/JSON", "Intern: localhost:8080")
+Rel(api, db, "JDBC / SQLite-Treiber", "Lesen und Schreiben")
+@enduml
+....
+
+=== Infrastruktur — Beschreibung der Knoten
+
+[cols="1,2,2"]
+|===
+|Knoten |Technologie |Zweck
+
+|Vereinsrechner
+|Handelsüblicher Rechner, Linux / macOS / Windows
+|Einziger Ausführungsort des Systems.
+Kein Server-Rack, keine VM, keine Container.
+
+|Leihgut-Prozess
+|JVM (Java/Kotlin/Clojure …) oder natives Executable, Port 8080
+|Startet mit `leihgut serve --port 8080`.
+Hält REST-API und Geschäftslogik im selben Prozess.
+
+|REST-API-Server
+|Eingebetteter HTTP-Server (z. B. Ktor, Spring Boot, Micronaut …)
+|Nimmt HTTP-Requests auf Port 8080 entgegen.
+Antwortet mit JSON.
+Kein TLS erforderlich (Lokal­betrieb).
+
+|CLI
+|Separates Executable oder Subcommand desselben Binaries
+|Werkzeug für den Wart.
+Übersetzt Terminal­eingaben in REST-Calls gegen localhost:8080.
+
+|leihgut.db
+|SQLite-Datei (ein einzelnes File)
+|Vollständige Datenhaltung.
+Kein Datenbankserver, kein separater Prozess.
+Dateipfad über Konfiguration steuerbar.
+
+|===
+
+=== Zuordnung Bausteine → Infrastruktur
+
+[cols="2,2"]
+|===
+|Baustein |Knoten
+
+|REST-API (alle Endpunkte)
+|Leihgut-Prozess, Port 8080
+
+|AusleiheService, PrüfprotokollService, SystemEventService, …
+|Leihgut-Prozess (In-Process)
+
+|Repository-Schicht (SQL)
+|Leihgut-Prozess → leihgut.db
+
+|CLI-Kommandos
+|CLI-Executable → REST-API auf localhost:8080
+
+|===
+
+=== Betriebsaspekte
+
+Verfügbarkeit::
+Keine Hochverfügbarkeit erforderlich.
+Der Verein öffnet dienstags und samstags.
+Ein Ausfall zwischen den Öffnungstagen ist folgenlos.
+Im Fehlerfall reicht ein Neustart des Prozesses.
+
+Backup::
+Tägliche Sicherungskopie der SQLite-Datei genügt.
+Da der Verein nur zweimal pro Woche öffnet, ist ein tägliches Skript
+(z. B. `cp leihgut.db leihgut-$(date +%F).db`) ausreichend.
+Die Datei ist konsistent, solange kein Schreibvorgang gerade läuft
+(SQLite WAL-Modus empfohlen).
+
+Health-Check::
++
+[source]
+----
+GET /health
+→ HTTP 200 OK  { "status": "UP", "db": "reachable" }
+----
++
+Kann von einem einfachen Monitoring-Skript oder manuell geprüft werden.
+
+Kein Docker / Kubernetes / Cloud::
+Diese Deployment-Optionen sind explizit außerhalb des Scopes.
+Das System ist für den Einzelprozess­betrieb auf einem Vereinsrechner konzipiert.
+
+Konfiguration::
+Minimale Konfiguration über Umgebungsvariablen oder eine `application.properties`-Datei:
++
+[source,properties]
+----
+leihgut.port=8080
+leihgut.db.path=./data/leihgut.db
+leihgut.datum.quelle=SYSTEM   # oder FIXED für Tests
+----

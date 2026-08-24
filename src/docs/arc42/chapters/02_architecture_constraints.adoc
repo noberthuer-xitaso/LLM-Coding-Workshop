@@ -1,0 +1,105 @@
+:jbake-title: Architecture Constraints
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 2
+:filename: /chapters/02_architecture_constraints.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+
+
+[[section-architecture-constraints]]
+== Randbedingungen
+
+Randbedingungen schränken den Lösungsraum ein und sind nicht verhandelbar.
+Sie ergeben sich aus den technischen Vorgaben des PRD, aus der Vereinsstruktur und aus dem geplanten Betriebsmodell.
+
+=== Technische Randbedingungen
+
+[cols="1,3,2", options="header"]
+|===
+|ID |Randbedingung |Begründung
+
+|TC-01
+|*REST-API als primäre Schnittstelle.* Alle Anwendungsfälle (Ausleihe, Rückgabe, Prüfung, Vormerkung, Katalog) sind über eine REST-API erreichbar.
+|Compiler und Testsuite greifen als Fehlerkorrektur voll; visuelle Konsistenz wäre automatisch nicht prüfbar.
+
+|TC-02
+|*CLI zusätzlich für Wart-Aufgaben.* Prüfprotokoll, Wartung abschließen, Gegenstand ausmustern und Katalogpflege sind auch per Kommandozeile bedienbar.
+|Rolf arbeitet oft allein in der Werkstatt; ein minimales Terminal-Interface reicht aus und vermeidet Browser-Abhängigkeit.
+
+|TC-03
+|*Kein Web-Frontend.* Es wird keine browser-basierte Benutzeroberfläche entwickelt oder ausgeliefert.
+|Scope-Begrenzung; vermeidet Abhängigkeit von UI-Frameworks und -Tests.
+
+|TC-04
+|*Keine Authentifizierung.* Rollen (`thekendienst`, `mitglied`, `wart`) werden über den HTTP-Header `X-Role` bzw. ein CLI-Flag übergeben und nicht kryptografisch geprüft.
+|Explizites Nicht-Ziel laut PRD; vereinfacht den Betrieb im Vereinskontext erheblich.
+
+|TC-05
+|*Einzelprozess, lokal startbar.* Das System läuft als ein einziger Prozess ohne externe Dienste (keine Datenbank-Server, keine Message-Broker, kein Cloud-Dienst).
+|Keine IT-Infrastruktur beim Verein vorhanden; einfaches Deployment auf einem handelsüblichen Laptop.
+
+|TC-06
+|*Keine externen Integrationen.* Kein Mailversand, keine Zahlungsanbindung, kein Webhook zu Drittsystemen.
+|Explizites Nicht-Ziel laut PRD.
+
+|TC-07
+|*Austauschbare Datumsquelle.* Das aktuelle Datum wird über eine injizierbare Schnittstelle (Strategy/Port) abgerufen und nicht direkt aus der Systemuhr gelesen.
+|Fristen (Rückgabefrist, Reservierungsverfall, Überfälligkeitsprüfung) müssen in automatisierten Tests deterministisch steuerbar sein.
+
+|TC-08
+|*Sprache, Framework und Persistenz sind frei wählbar.* Es gibt keine Vorgabe zur Implementierungstechnologie.
+|Ermöglicht die Wahl der für das Team geeignetsten Technologie; fördert Wartbarkeit.
+|===
+
+=== Organisatorische Randbedingungen
+
+[cols="1,3,2", options="header"]
+|===
+|ID |Randbedingung |Begründung
+
+|OC-01
+|*Selbstbetrieb durch den Verein.* Es gibt keinen externen Hosting-Anbieter; das System wird von Vereinsmitgliedern betrieben.
+|Betriebskosten müssen minimal bleiben; externe Abhängigkeiten erhöhen das Risiko.
+
+|OC-02
+|*Ehrenamtliche Thekenkräfte ohne IT-Schulung.* Die REST-API muss so gestaltet sein, dass ein Thekendienst ohne Einarbeitung in weniger als 30 Sekunden die Ausgabefähigkeit prüfen kann.
+|Wechselnde, ungeschulte Bedienung ist der Normalfall; komplexe UI oder mehrstufige Workflows sind nicht zumutbar.
+
+|OC-03
+|*Ubiquitous Language aus dem Glossar.* Alle Bezeichner im Code (Klassen, Methoden, Felder, API-Pfade) folgen dem Glossar des PRD. Englische Übersetzungen sind unerwünscht.
+|Erleichtert Domänenexperten (Vereinsvorstand, Wart) das Lesen und Überprüfen von Code und Tests ohne Begriffsmapping.
+
+|OC-04
+|*Geschäftsregeln als stabile BR-IDs referenziert.* Jeder automatisierte Test nennt die BR-ID der Regel, die er prüft.
+|Lückenerkennung: Die DoD verlangt, dass jede Geschäftsregel durch mindestens ein Gherkin-Szenario abgedeckt ist.
+
+|OC-05
+|*Architekturentscheidungen als ADR dokumentiert.* Jede wesentliche Entscheidung liegt als Architecture Decision Record vor, bevor das zugehörige Increment als fertig gilt.
+|Nachvollziehbarkeit für Nachfolger; verhindert, dass Entscheidungen implizit bleiben.
+|===
+
+=== Konventionen
+
+[cols="1,3", options="header"]
+|===
+|Konvention |Beschreibung
+
+|Sprache
+|Fachbegriffe im Code auf Deutsch, gemäß Glossar des PRD. Technische Bezeichner (HTTP-Verben, Bibliotheksnamen) bleiben englisch.
+
+|Kautionsbeträge
+|Immer in ganzen Euro (Integer), niemals als Fließkommazahl. Rundung nach kaufmännischer Regel (BR-04).
+
+|Zeitstempel
+|ISO 8601, UTC, Millisekunden-Genauigkeit (`2026-08-24T09:15:00.000Z`).
+
+|Datumsangaben (ohne Uhrzeit)
+|ISO 8601 Datumstring (`2026-08-24`); Fristen beziehen sich immer auf den Kalendertag.
+
+|HTTP-Statuscodes
+|Fachliche Ablehnungen (z. B. BR-07 Sperre) werden als `422 Unprocessable Entity` mit maschinenlesbarem Fehlercode zurückgegeben, nicht als `400 Bad Request`.
+|===
