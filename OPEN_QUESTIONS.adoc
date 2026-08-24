@@ -1,0 +1,50 @@
+= Socratic Code-Theory Recovery: Open Questions
+:toc: left
+:icons: font
+
+Phase 1 — open questions that cannot be answered from source code alone.
+To be filled in by the relevant role before Phase 2 documentation synthesis begins.
+
+Each question corresponds to a leaf in `QUESTION_TREE.adoc` and is copied verbatim.
+
+---
+
+== Product Owner
+
+=== Q1.5 Success metrics
+What measurable outcome defines a successful release 1? (e.g., zero incorrect deposit payouts, zero maintenance-blocked items issued, or reservation adherence rate.)
+
+=== Q1.6 Segment priority
+Which user segment or workflow must be delivered first — counter checkout, member self-service, or workshop operations?
+
+=== Q4.4 Usability target
+What usability target matters most for this system: response speed at the counter, member self-service clarity, or minimising Rolf's data-entry burden?
+
+---
+
+== Architect
+
+=== Q4.3 External integrations
+Which external systems (member management, payment, export formats) must this context integrate with, and what API contracts are required?
+
+=== Q4.9 Quality priority
+Which of the demonstrated qualities should win when trade-offs arise — functional correctness, data reliability, or developer-side maintainability?
+
+---
+
+== Developer
+
+No open questions for this role.
+
+---
+
+== Domain Expert
+
+No open questions for this role.
+
+---
+
+== Operations
+
+=== Q4.2 Performance budget
+What is the acceptable response-time budget per REST call, and what concurrent-user load must the single-process SQLite deployment sustain before needing a different database?
