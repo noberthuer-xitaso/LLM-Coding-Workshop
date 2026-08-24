@@ -10,6 +10,7 @@ from leihgut.api import audit as audit_router
 from leihgut.api import ausleihe as ausleihe_router
 from leihgut.api import einweisung as einweisung_router
 from leihgut.api import katalog as katalog_router
+from leihgut.api import pruefprotokoll as pruefprotokoll_router
 from leihgut.infrastructure.datenbank import erstelle_tabellen
 
 
@@ -30,6 +31,7 @@ app.include_router(katalog_router.router)
 app.include_router(audit_router.router)
 app.include_router(einweisung_router.router)
 app.include_router(ausleihe_router.router)
+app.include_router(pruefprotokoll_router.router)
 
 
 @app.exception_handler(HTTPException)

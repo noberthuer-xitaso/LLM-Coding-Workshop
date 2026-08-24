@@ -125,3 +125,26 @@ def prüfe_kautionsabzug(abzug: int, hinterlegte_kaution: int) -> list[str]:
     if abzug > hinterlegte_kaution:
         return [f"BR-21: Abzug {abzug} > hinterlegte Kaution {hinterlegte_kaution}"]
     return []
+
+
+# ─────────────────────────────────────────────
+#  BR-19/24: Effektiver Nachzustand
+# ─────────────────────────────────────────────
+
+
+def bestimme_effektiven_nachzustand(
+    nachzustand_eingabe: str,
+    nutzungszaehler_neu: int,
+    wartungsintervall: int,
+) -> str:
+    """BR-19/24: Effektiver Gegenstandszustand nach Prüfung.
+
+    "verloren" → "ausgemustert" (BR-19, absolute Priorität).
+    nutzungszaehler_neu >= wartungsintervall → "wartungsfällig" (BR-24, überschreibt).
+    Sonst: eingegebener Zustand.
+    """
+    if nachzustand_eingabe == "verloren":
+        return "ausgemustert"
+    if nutzungszaehler_neu >= wartungsintervall:
+        return "wartungsfällig"
+    return nachzustand_eingabe
