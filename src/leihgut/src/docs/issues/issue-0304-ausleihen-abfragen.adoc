@@ -1,0 +1,24 @@
+= Issue 0304: Laufende Ausleihen abfragen
+
+:issue-id: 0304
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-Abfrage, BR-35
+
+== Beschreibung
+
+Thekendienst oder Wart fragt laufende und historische Ausleihen eines Mitglieds ab.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied mit aktiven Ausleihen
+When GET /mitglieder/{id}/ausleihen
+Then 200 mit Array von AusleiheAntwort inkl. ueberfaellig-Flag
+----
+
+== Abhängigkeiten
+
+- 0302 (Gegenstand ausleihen)

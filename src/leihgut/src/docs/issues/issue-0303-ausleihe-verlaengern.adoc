@@ -1,0 +1,28 @@
+= Issue 0303: Ausleihe verlängern
+
+:issue-id: 0303
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-Verlaengerung, BR-10, BR-11
+
+== Beschreibung
+
+Thekendienst oder Mitglied verlängert eine aktive Ausleihe einmalig um die Leihdauer der Kategorie.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given eine aktive, nicht überfällige, noch nicht verlängerte Ausleihe ohne offene Vormerkung
+When POST /ausleihen/{id}/verlaengerung
+Then 200 mit verlaengert=true und neuer rueckgabefrist
+
+Given eine bereits verlängerte Ausleihe
+When POST /ausleihen/{id}/verlaengerung
+Then 409 BEREITS_VERLAENGERT
+----
+
+== Abhängigkeiten
+
+- 0302 (Gegenstand ausleihen)

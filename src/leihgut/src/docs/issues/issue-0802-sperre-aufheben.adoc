@@ -1,0 +1,25 @@
+= Issue 0802: Mitgliedersperre aufheben nach Prüfungsabschluss
+
+:issue-id: 0802
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-34, BR-35
+
+== Beschreibung
+
+Sobald alle überfälligen Ausleihen eines Mitglieds abgeschlossen sind, ist es nicht mehr gesperrt.
+Der Status ist abgeleitet — keine explizite Entsperraktion nötig.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied, dessen überfällige Ausleihe auf status="abgeschlossen" gesetzt wurde
+When GET /mitglieder/{id}/sperrstatus
+Then 200 mit gesperrt=false
+----
+
+== Abhängigkeiten
+
+- 0801 (Mitglied automatisch sperren)

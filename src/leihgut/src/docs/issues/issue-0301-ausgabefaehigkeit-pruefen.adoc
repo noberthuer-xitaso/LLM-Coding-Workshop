@@ -1,0 +1,29 @@
+= Issue 0301: Ausgabefähigkeit eines Gegenstands prüfen
+
+:issue-id: 0301
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-Ausgabe, BR-05, BR-06, BR-07, BR-08
+
+== Beschreibung
+
+Thekendienst oder Wart prüft alle Ausgabebedingungen für einen Gegenstand und ein Mitglied,
+ohne die Ausleihe anzulegen.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein verfügbarer Gegenstand und ein nicht gesperrtes Mitglied
+When GET /gegenstaende/{inventarnummer}/ausgabefaehigkeit?mitglied_id={uuid}
+Then 200 mit darfAusgegeben=true und leerer ablehnungsgruende-Liste
+
+Given ein gesperrtes Mitglied
+When GET /gegenstaende/{inventarnummer}/ausgabefaehigkeit?mitglied_id={uuid}
+Then 200 mit darfAusgegeben=false und BR-07 in ablehnungsgruende
+----
+
+== Abhängigkeiten
+
+- 0101 (Katalog-Verwaltung)

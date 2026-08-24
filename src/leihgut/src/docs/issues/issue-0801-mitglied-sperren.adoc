@@ -1,0 +1,28 @@
+= Issue 0801: Mitglied automatisch sperren bei Überfälligkeit
+
+:issue-id: 0801
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-34, BR-35
+
+== Beschreibung
+
+Das System leitet den Sperrstatus eines Mitglieds aus überfälligen Ausleihen ab (kein persistentes Feld).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein Mitglied mit einer Ausleihe, deren Rückgabefrist überschritten ist
+When GET /mitglieder/{id}/sperrstatus
+Then 200 mit gesperrt=true und ueberfaelligeAusleihen=1
+
+Given ein Mitglied ohne überfällige Ausleihen
+When GET /mitglieder/{id}/sperrstatus
+Then 200 mit gesperrt=false und ueberfaelligeAusleihen=0
+----
+
+== Abhängigkeiten
+
+- 0302 (Gegenstand ausleihen)

@@ -1,0 +1,27 @@
+= Issue 0302: Gegenstand ausleihen
+
+:issue-id: 0302
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-Ausgabe, BR-05, BR-06, BR-07, BR-08, BR-09
+
+== Beschreibung
+
+Thekendienst leiht einen verfügbaren Gegenstand an ein Mitglied aus.
+Kaution wird hinterlegt, Zustandswechsel wird im Audit protokolliert.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Given ein verfügbarer Gegenstand, ein nicht gesperrtes Mitglied
+When POST /ausleihen mit gegenstandId, mitgliedId, ausgabedatum
+Then 201 mit ausleiheId, rueckgabefrist = ausgabedatum + leihdauer_tage
+And Gegenstand.zustand = "ausgeliehen"
+And Kautionsbewegung "hinterlegung" vorhanden
+----
+
+== Abhängigkeiten
+
+- 0301 (Ausgabefähigkeit prüfen)
